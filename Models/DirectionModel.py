@@ -32,7 +32,6 @@ class DirectionModel(TradingModelInterface):
                 learning_rate=0.1,
                 random_state=42,
                 n_jobs=-1,
-                use_label_encoder=False,
                 eval_metric="logloss"
             )
             
@@ -47,7 +46,7 @@ class DirectionModel(TradingModelInterface):
         Construit X et y à partir du FeatureManager et TargetManager.
         """
         Indicator = cast(DirectionIndicators, self.feature_manager.get_feature(FeatureID.DIRECTION))
-        Target = cast(Target_Plus_5, self.target_manager.get_target(TargetID.SHIFTED_PLUS_5))
+        Target = cast(Target_Direction, self.target_manager.get_target(TargetID.DIRECTION))
 
         df = pd.DataFrame({
             "rsi_momentum": Indicator.rsi_momentum,
@@ -61,9 +60,16 @@ class DirectionModel(TradingModelInterface):
             "target": Target.target
         }).dropna()
 
+        print('Target dans Build dataset DirectionModel:')
+        print(Target.target)
+
         X = df.drop(columns="target").to_numpy()
         y = df["target"].to_numpy()
 
+        print("X dans Build dataset DirectionModel:")
+        print(X)
+        print("Y dans Build dataset DirectionModel:")
+        print(y)
         return X, y
     
     def get_required_features(self) -> Set[FeatureID]:
@@ -74,6 +80,7 @@ class DirectionModel(TradingModelInterface):
         Entraîne le modèle sur toutes les données.
         """
         X, y = self._build_dataset()
+        print(y)
         self.model.fit(X, y)
 
     def test(self) -> float:

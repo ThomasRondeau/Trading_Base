@@ -55,7 +55,7 @@ class TargetManager:
         self.data = new_data
         self.clear_cache()
         self.data_shift = training_data_shift
-
+        print(f"Updating TargetManager with training_data_shift = {training_data_shift}") #TODO remove
         for target in self._targets.values():
             target.update(new_data, training_data_shift) 
 

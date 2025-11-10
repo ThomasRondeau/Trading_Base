@@ -106,6 +106,7 @@ class CascadeStrategy(TradingStrategyInterface):
         self.targetManager.register_target(TargetID.SHIFTED_PLUS_5, Target_Plus_5())
         self.targetManager.register_target(TargetID.SHIFTED_PLUS_10, Target_Plus_10())
         self.targetManager.register_target(TargetID.SHIFTED_PLUS_20, Target_Plus_20())
+        self.targetManager.register_target(TargetID.DIRECTION, Target_Direction())
 
         self.targetManager.clear_cache()
 

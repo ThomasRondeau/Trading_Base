@@ -55,10 +55,21 @@ class AmplitudeModel(TradingModelInterface):
             "momentum": Indicator.momentum_strength,
             "volume": Indicator.volume_intensity,
             "target": Target.target
-        }).dropna()
+        })
 
+        print(f"Taille du DataFrame AVANT dropna: {len(df)}")
+        print(f"Nombre de NaN par colonne:\n{df.isna().sum()}")
+
+        
+        print('Target dans Build dataset AmplitudeModel:')
+        print(df["target"])
         X = df.drop(columns="target").to_numpy()
         y = df["target"].to_numpy()
+
+        print("X dans Build dataset AmplitudeModel:")
+        print(X)
+        print("Y dans Build dataset AmplitudeModel:")
+        print(y)
 
         return X, y
 

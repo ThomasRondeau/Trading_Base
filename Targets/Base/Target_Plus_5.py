@@ -11,7 +11,9 @@ class Target_Plus_5(TargetInterface):
         self.training_data_shift = 0
 
     def calculate(self, resolved_dependencies: dict[TargetID, TargetInterface] = None) -> None:
-        self.target = self.data['close'].iloc[: 5 - self.training_data_shift].reset_index(drop=True)
+        print(self.data["close"])
+        self.target = self.data['close'].iloc[ 5 : 5 - self.training_data_shift].reset_index(drop=True)
+        print(self.target)
         
 
     def update(self, new_data: pd.DataFrame, training_data_shift : int) -> None:
