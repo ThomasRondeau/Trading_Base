@@ -52,24 +52,22 @@ class DirectionModel(TradingModelInterface):
             "rsi_momentum": Indicator.rsi_momentum,
             "macd_momentum": Indicator.macd_momentum,
             "price_vs_sma": Indicator.price_vs_sma,
-            "distance_bb": Indicator.distance_to_bb,
-            "rsi_extreme": Indicator.rsi_extreme,
-            "macd_intensity": Indicator.macd_intensity,
-            "momentum_strength": Indicator.momentum_strength,
-            "volume_intensity": Indicator.volume_intensity,
+            "sma_slope": Indicator.sma_slope,
+            "price_position": Indicator.price_position,
+            "upper_breakout": Indicator.upper_breakout,
+            "lower_breakout": Indicator.lower_breakout,
+            "bullish_confluence": Indicator.bullish_confluence,
+            "bearish_confluence": Indicator.bearish_confluence,
+            "volume_price_trend": Indicator.volume_price_trend,
             "target": Target.target
-        }).dropna()
+        })
 
-        print('Target dans Build dataset DirectionModel:')
-        print(Target.target)
+
+        df = df.dropna().reset_index(drop=True)
 
         X = df.drop(columns="target").to_numpy()
         y = df["target"].to_numpy()
 
-        print("X dans Build dataset DirectionModel:")
-        print(X)
-        print("Y dans Build dataset DirectionModel:")
-        print(y)
         return X, y
     
     def get_required_features(self) -> Set[FeatureID]:
@@ -80,7 +78,6 @@ class DirectionModel(TradingModelInterface):
         Entraîne le modèle sur toutes les données.
         """
         X, y = self._build_dataset()
-        print(y)
         self.model.fit(X, y)
 
     def test(self) -> float:

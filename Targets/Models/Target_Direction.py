@@ -12,14 +12,12 @@ class Target_Direction(TargetInterface):
 
     def calculate(self, resolved_dependencies: dict[TargetID, TargetInterface] = None) -> None:
         shifted = self.data['close'].iloc[5 : 5 - self.training_data_shift].reset_index(drop=True)
-        self.target = (shifted > self.data['close'][:-5]).astype(int)
-        print('Target dans calculate Target_Direction:')
-        print(self.target)
+        self.target = (shifted > self.data['close'][:-self.training_data_shift].reset_index(drop=True)).astype(int)
         
 
     def update(self, new_data: pd.DataFrame, training_data_shift : int) -> None:
         if 'close' not in new_data:
-            raise ValueError("Erreur dans Target_Plus_10 : La colonne 'close' doit être présente dans les nouvelles données.")
+            raise ValueError("Erreur dans Target_Direction : La colonne 'close' doit être présente dans les nouvelles données.")
         
         self.data = new_data
         self.training_data_shift = training_data_shift

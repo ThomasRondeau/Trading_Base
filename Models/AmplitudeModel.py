@@ -43,7 +43,7 @@ class AmplitudeModel(TradingModelInterface):
         Construit X et Y à partir du FeatureManager et TargetManager.
         """
         Indicator = cast(AmplitudeIndicators, self.feature_manager.get_feature(FeatureID.AMPLITUDE))
-        Target = cast(Target_Plus_5, self.target_manager.get_target(TargetID.SHIFTED_PLUS_5))
+        Target = cast(Target_Amplitude, self.target_manager.get_target(TargetID.AMPLITUDE))
 
         df = pd.DataFrame({
             "volatility": Indicator.current_volatility,
@@ -57,19 +57,10 @@ class AmplitudeModel(TradingModelInterface):
             "target": Target.target
         })
 
-        print(f"Taille du DataFrame AVANT dropna: {len(df)}")
-        print(f"Nombre de NaN par colonne:\n{df.isna().sum()}")
-
+        df = df.dropna().reset_index(drop=True)
         
-        print('Target dans Build dataset AmplitudeModel:')
-        print(df["target"])
         X = df.drop(columns="target").to_numpy()
         y = df["target"].to_numpy()
-
-        print("X dans Build dataset AmplitudeModel:")
-        print(X)
-        print("Y dans Build dataset AmplitudeModel:")
-        print(y)
 
         return X, y
 

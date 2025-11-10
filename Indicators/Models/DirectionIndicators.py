@@ -11,11 +11,14 @@ class DirectionIndicators(IndicatorInterface):
         self.rsi_momentum = None
         self.macd_momentum = None
         self.price_vs_sma = None
-        self.distance_to_bb = None
-        self.rsi_extreme = None
-        self.macd_intensity = None
-        self.momentum_strength = None
-        self.volume_intensity = None
+        self.sma_slope = None
+        self.price_position = None
+        self.upper_breakout = None
+        self.lower_breakout = None
+        self.bullish_confluence = None
+        self.bearish_confluence = None
+        self.volume_price_trend = None
+
 
     def dependencies(self):
         """
@@ -40,7 +43,7 @@ class DirectionIndicators(IndicatorInterface):
         Volume = cast(VOLUME, resolved_dependencies.get(FeatureID.VOLUME))
 
         if not Atr or not Sma_20 or not Bollinger_Bands or not Rsi or not Macd or not Volume:
-            raise ValueError("Erreur dans AmplitudeIndicators : Les dépendances nécessaires ne sont pas résolues.")
+            raise ValueError("Erreur dans DirectionIndicators : Les dépendances nécessaires ne sont pas résolues.")
 
 
         self.rsi_momentum = (Rsi.rsi > 50 ).astype(int)

@@ -44,7 +44,7 @@ class OpportunityModel(TradingModelInterface):
         Construit X et y à partir du FeatureManager et TargetManager.
         """
         Indicator = cast(OpportunityIndicators, self.feature_manager.get_feature(FeatureID.OPPORTUNITY))
-        Target = cast(Target_Plus_5, self.target_manager.get_target(TargetID.SHIFTED_PLUS_5))
+        Target = cast(Target_Opportunity, self.target_manager.get_target(TargetID.OPPORTUNITY))
 
         df = pd.DataFrame({
             "volatility_compression": Indicator.volatility_compression,

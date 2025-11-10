@@ -16,7 +16,7 @@ class Target_Plus_1(TargetInterface):
 
     def update(self, new_data: pd.DataFrame, training_data_shift : int) -> None:
         if 'close' not in new_data:
-            raise ValueError("Erreur dans Target_Plus_10 : La colonne 'close' doit être présente dans les nouvelles données.")
+            raise ValueError("Erreur dans Target_Plus_1 : La colonne 'close' doit être présente dans les nouvelles données.")
         
         self.data = new_data
         self.training_data_shift = training_data_shift
