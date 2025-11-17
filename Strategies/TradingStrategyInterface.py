@@ -35,7 +35,7 @@ class TradingStrategyInterface(ABC):
     def run(self) -> None:
         """Exécute la stratégie de trading."""
         pass
-
+    
     @abstractmethod
     def stop(self) -> None:
         """Arrête la stratégie de trading."""

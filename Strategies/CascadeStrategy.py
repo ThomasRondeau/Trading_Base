@@ -144,7 +144,59 @@ class CascadeStrategy(TradingStrategyInterface):
         """
         if self.IsRunning:
             raise RuntimeError("La stratégie est déjà en cours d'exécution.")
+        
+        self.IsRunning = True
+
         # Implémentation de la logique de la stratégie en cascade
+
+        # 1. Y a-t-il une opportunité ?
+        has_opportunity = self.OpportunityModel.predict()
+        
+        if not has_opportunity:
+            return {
+                'action': 'HOLD',
+                'confidence': 0.0,
+                'expected_return': 0.0,
+                'reasoning': "Pas d'opportunité détectée (mouvement insuffisant attendu)"
+            }
+        
+        # 2. Quelle direction ?
+        direction = self.DirectionModel.predict()  # 1 pour UP ou 0 pour DOWN
+        
+        # 3. Quelle amplitude ?
+        amplitude = self.AmplitudeModel.predict()  # en %
+        
+        # 4. Vérifier si l'amplitude justifie le trade
+        if abs(amplitude) < self.min_amplitude_threshold:
+            return {
+                'action': 'HOLD',
+                'confidence': 0.5,
+                'expected_return': amplitude,
+                'reasoning': f"Opportunité détectée mais amplitude trop faible ({amplitude:.2f}%)"
+            }
+        
+        # 5. Vérifier la cohérence direction/amplitude
+        direction_matches_amplitude = (
+            (direction == 'UP' and amplitude > 0) or
+            (direction == 'DOWN' and amplitude < 0)
+        )
+        
+        if not direction_matches_amplitude:
+            # Conflit entre les modèles
+            return {
+                'action': 'HOLD',
+                'confidence': 0.3,
+                'expected_return': amplitude,
+                'reasoning': f"Conflit: Direction={direction} mais Amplitude={amplitude:.2f}%"
+            }
+        
+        # 6. Tout est cohérent → Trade !
+        action = 'BUY' if direction == 'UP' else 'SELL'
+        
+        # Confiance basée sur l'amplitude (plus c'est grand, plus on est confiant)
+        confidence = min(abs(amplitude) / 5.0, 1.0)  # Plafond à 5%
+
+        
         pass
 
 

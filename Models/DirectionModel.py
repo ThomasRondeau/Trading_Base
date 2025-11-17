@@ -126,11 +126,13 @@ class DirectionModel(TradingModelInterface):
             Indicator.rsi_momentum.iloc[-1],
             Indicator.macd_momentum.iloc[-1],
             Indicator.price_vs_sma.iloc[-1],
-            Indicator.distance_to_bb.iloc[-1],
-            Indicator.rsi_extreme.iloc[-1],
-            Indicator.macd_intensity.iloc[-1],
-            Indicator.momentum_strength.iloc[-1],
-            Indicator.volume_intensity.iloc[-1]
+            Indicator.sma_slope.iloc[-1],
+            Indicator.price_position.iloc[-1],
+            Indicator.upper_breakout.iloc[-1],
+            Indicator.lower_breakout.iloc[-1],
+            Indicator.bullish_confluence.iloc[-1],
+            Indicator.bearish_confluence.iloc[-1],
+            Indicator.volume_price_trend.iloc[-1]
         ]])
         
         prediction = self.model.predict(feature_array)[0]

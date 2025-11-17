@@ -127,4 +127,10 @@ class OpportunityModel(TradingModelInterface):
             Indicator.price_acceleration.iloc[-1]
         ]])
         
-        return bool(self.model.predict(feature_array)[0])
+        prediction = self.model.predict(feature_array)[0]
+        
+        if prediction == 1:
+            return True
+        
+        return False 
+
