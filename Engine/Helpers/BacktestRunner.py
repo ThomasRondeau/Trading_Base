@@ -7,7 +7,7 @@ import time
 from queue import Queue
 import pandas as pd
 
-from Strategies.Helpers.RiskManager import RiskManager
+from .RiskManager import RiskManager
 
 
 class BacktestRunner:

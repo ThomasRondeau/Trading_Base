@@ -4,8 +4,6 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import TimeSeriesSplit
 from Features.FeatureID import FeatureID
 from Features.FeatureManager import FeatureManager
-from Features.TargetID import TargetID
-from Features.TargetManager import TargetManager
 from Features import *
 from Targets import *
 from Models.TradingModelInterface import TradingModelInterface

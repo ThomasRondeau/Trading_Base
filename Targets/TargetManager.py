@@ -1,7 +1,6 @@
 import pandas as pd
 from typing import Dict, Set, Type, Any
-from Targets.TargetID import TargetID
-from Targets.TargetInterface import TargetInterface
+from Targets import *
 
 
 class TargetManager:

@@ -1,17 +1,16 @@
 import pandas as pd
 from typing import Dict, Set, Type, Any
-from Features.FeatureID import FeatureID
-from Features.IndicatorInterface import IndicatorInterface
+from Features import *
 
 
 class FeatureManager:
     def __init__(self, data: pd.DataFrame = pd.DataFrame()):
         self.data = data
-        self._cache: Dict[FeatureID, IndicatorInterface] = {}
-        self._indicators: Dict[FeatureID, IndicatorInterface] = {}
+        self._cache: Dict[FeatureID, FeatureInterface] = {}
+        self._indicators: Dict[FeatureID, FeatureInterface] = {}
 
 
-    def register_indicator(self, feature_id: FeatureID, indicator: IndicatorInterface):
+    def register_indicator(self, feature_id: FeatureID, indicator: FeatureInterface):
         """
         Enregistre directement une instance d'indicateur.
         """
@@ -20,7 +19,7 @@ class FeatureManager:
         self._indicators[feature_id] = indicator
 
 
-    def get_feature(self, feature_id: FeatureID) -> IndicatorInterface:
+    def get_feature(self, feature_id: FeatureID) -> FeatureInterface:
         """
         Retourne la valeur de la feature depuis le cache ou en recalculant si nécessaire.
         """
@@ -42,7 +41,7 @@ class FeatureManager:
         return indicator
     
 
-    def get_features(self, feature_ids: Set[FeatureID]) -> Dict[FeatureID, IndicatorInterface]:
+    def get_features(self, feature_ids: Set[FeatureID]) -> Dict[FeatureID, FeatureInterface]:
         """
         Retourne un dictionnaire de valeurs pour les features demandées.
         """

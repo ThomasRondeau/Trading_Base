@@ -1,10 +1,6 @@
 from datetime import datetime, time, timedelta
 import pandas as pd
 from Connections.Trading_App import TradingApp
-from Features.FeatureManager import FeatureManager
-from Features.FeatureID import FeatureID
-from Features.TargetManager import TargetManager
-from Features.TargetID import TargetID
 from Models import AmplitudeModel, DirectionModel, OpportunityModel
 from Strategies.TradingStrategyInterface import TradingStrategyInterface
 from typing import Dict, Any

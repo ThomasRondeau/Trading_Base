@@ -1,9 +1,8 @@
 from typing import cast
 import pandas as pd
-from Features.FeatureID import FeatureID
 from Features import *
 
-class OpportunityIndicators(IndicatorInterface):
+class OpportunityIndicators(FeatureInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame()):
 
         self.data = data
@@ -32,7 +31,7 @@ class OpportunityIndicators(IndicatorInterface):
             FeatureID.VOLUME
         }
 
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface]):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface]):
 
         Atr = cast(ATR, resolved_dependencies.get(FeatureID.ATR))
         Sma_5 = cast(SMA, resolved_dependencies.get(FeatureID.SMA_5))
@@ -43,7 +42,7 @@ class OpportunityIndicators(IndicatorInterface):
         Volume = cast(VOLUME, resolved_dependencies.get(FeatureID.VOLUME))
 
         if not Atr or not Sma_5 or not Sma_20 or not Bollinger_Bands or not Rsi or not Macd or not Volume:
-            raise ValueError("Erreur dans AmplitudeIndicators : Les dépendances nécessaires ne sont pas résolues.")
+            raise ValueError("Erreur dans OpportunityFeatures : Les dépendances nécessaires ne sont pas résolues.")
 
         self.volatility_compression = (Bollinger_Bands.width < Bollinger_Bands.width.rolling(window=10).mean()).astype(int)
         self.volatility_expansion = (Atr.atr > Atr.atr.shift(1) * 1.2).astype(int)

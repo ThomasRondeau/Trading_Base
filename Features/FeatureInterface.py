@@ -1,10 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import Any
 import pandas as pd
-from Features import IndicatorInterface
-from Features.FeatureID import FeatureID
+from Features import *
 
-class IndicatorInterface(ABC):
+class FeatureInterface(ABC):
     """
     Interface que les indicateurs doivent implémenter.
     Cette interface permet aux indicateurs de déclarer leurs besoins en données
@@ -28,7 +27,7 @@ class IndicatorInterface(ABC):
         return []
 
     @abstractmethod
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface] = None):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface] = None):
         """
         Calcule la valeur de l'indicateur.
         

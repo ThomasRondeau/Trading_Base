@@ -1,10 +1,9 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from Features.FeatureID import FeatureID
-from Features.IndicatorInterface import IndicatorInterface
+from Features import *
 
-class Vwap(IndicatorInterface):
+class Vwap(FeatureInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), std_multiplier: float = 3):
         """
         Initialise l'indicateur VWAP avec les données fournies.
@@ -21,7 +20,7 @@ class Vwap(IndicatorInterface):
         self.far_inferior_limit = None
         self.inferior_limit = None
 
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface] = None):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface] = None):
         """
         Calcule le VWAP et les bandes d'écart-type.
         """

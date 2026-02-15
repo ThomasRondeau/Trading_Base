@@ -1,10 +1,9 @@
 from typing import cast
 import pandas as pd
 import numpy as np
-from Features.FeatureID import FeatureID
 from Features import *
 
-class AmplitudeIndicators(IndicatorInterface):
+class AmplitudeFeatures(FeatureInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame()):
 
         self.data = data
@@ -30,7 +29,7 @@ class AmplitudeIndicators(IndicatorInterface):
             FeatureID.VOLUME
         }
 
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface]):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface]):
 
         Atr = cast(ATR, resolved_dependencies.get(FeatureID.ATR))
         Sma_20 = cast(SMA, resolved_dependencies.get(FeatureID.SMA_20))
@@ -40,7 +39,7 @@ class AmplitudeIndicators(IndicatorInterface):
         Volume = cast(VOLUME, resolved_dependencies.get(FeatureID.VOLUME))
 
         if not Atr or not Sma_20 or not Bollinger_Bands or not Rsi or not Macd or not Volume:
-            raise ValueError("Erreur dans AmplitudeIndicators : Les dépendances nécessaires ne sont pas résolues.")
+            raise ValueError("Erreur dans AmplitudeFeatures : Les dépendances nécessaires ne sont pas résolues.")
 
 
         self.current_volatility = Atr.atr / self.data['close']

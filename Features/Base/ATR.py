@@ -1,8 +1,8 @@
 import pandas as pd
 from Features.FeatureID import FeatureID
-from Features.IndicatorInterface import IndicatorInterface
+from Features.FeatureInterface import FeatureInterface
 
-class ATR(IndicatorInterface):
+class ATR(FeatureInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), window: int = 14):
         """
         Initialise le calculateur ATR avec les données fournies.
@@ -15,7 +15,7 @@ class ATR(IndicatorInterface):
         self.true_range = None
         self.atr = None
 
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface] = None):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface] = None):
         """
         Calcule l'ATR et l'ajoute à l'attribut `self.atr`.
         """

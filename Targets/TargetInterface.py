@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import pandas as pd
-from Features.TargetID import TargetID
-from Targets import TargetInterface
+from Features import *
+from Targets import *
 
 class TargetInterface:
 

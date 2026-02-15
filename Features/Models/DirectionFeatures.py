@@ -4,7 +4,7 @@ import pandas as pd
 from Features.FeatureID import FeatureID
 from Features import *
 
-class DirectionIndicators(IndicatorInterface):
+class DirectionFeatures(FeatureInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame()):
 
         self.data = data
@@ -34,7 +34,7 @@ class DirectionIndicators(IndicatorInterface):
             FeatureID.VOLUME
         }
 
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface]):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface]):
         Atr = cast(ATR, resolved_dependencies.get(FeatureID.ATR))
         Sma_20 = cast(SMA, resolved_dependencies.get(FeatureID.SMA_20))
         Bollinger_Bands = cast(BollingerBands, resolved_dependencies.get(FeatureID.BOLLINGER_BANDS))
@@ -43,7 +43,7 @@ class DirectionIndicators(IndicatorInterface):
         Volume = cast(VOLUME, resolved_dependencies.get(FeatureID.VOLUME))
 
         if not Atr or not Sma_20 or not Bollinger_Bands or not Rsi or not Macd or not Volume:
-            raise ValueError("Erreur dans DirectionIndicators : Les dépendances nécessaires ne sont pas résolues.")
+            raise ValueError("Erreur dans DirectionFeatures : Les dépendances nécessaires ne sont pas résolues.")
 
 
         self.rsi_momentum = (Rsi.rsi > 50 ).astype(int)

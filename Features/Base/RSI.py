@@ -1,8 +1,7 @@
 import pandas as pd
-from Features.FeatureID import FeatureID
-from Features.IndicatorInterface import IndicatorInterface
+from Features import *
 
-class RSI(IndicatorInterface):
+class RSI(FeatureInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), window: int = 14):
         """
         Initialise le calculateur de RSI avec les données fournies.
@@ -14,7 +13,7 @@ class RSI(IndicatorInterface):
         self.window = window
         self.rsi = None
 
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface] = None):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface] = None):
         """
         Calcule le RSI et l'ajoute à l'attribut `self.rsi`.
         """

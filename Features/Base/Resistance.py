@@ -1,10 +1,9 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from Features.FeatureID import FeatureID
-from Features.IndicatorInterface import IndicatorInterface
+from Features import *
 
-class Resistance(IndicatorInterface):
+class Resistance(FeatureInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), window: int = 10, min_len_resistance : int = 50):
         """
         Initialise le détecteur de résistances avec les données fournies.
@@ -20,7 +19,7 @@ class Resistance(IndicatorInterface):
         self.resistances = []
 
 
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface] = None):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface] = None):
         if 'high' not in self.data or 'close' not in self.data:
             raise ValueError("Erreur dans Resistance : Les colonnes 'high' et 'close' doivent être présentes dans les données.")
 

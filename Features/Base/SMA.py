@@ -1,8 +1,7 @@
 import pandas as pd
-from Features.FeatureID import FeatureID
-from Features.IndicatorInterface import IndicatorInterface
+from Features import *
 
-class SMA(IndicatorInterface):
+class SMA(FeatureInterface):
     """
     Simple Moving Average (SMA) Indicator
     """
@@ -13,7 +12,7 @@ class SMA(IndicatorInterface):
         self.data = data
         self.sma = None
 
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface] = None):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface] = None):
         """
         Calculate the Simple Moving Average for the given data.
         

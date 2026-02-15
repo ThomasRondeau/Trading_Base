@@ -1,8 +1,7 @@
 import pandas as pd
-from Features.FeatureID import FeatureID
-from Features.IndicatorInterface import IndicatorInterface
+from Features import *
 
-class Support(IndicatorInterface):
+class Support(FeatureInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), window: int = 10, min_len_support : int = 50):
         """
         Initialise le détecteur de supports avec les données fournies.
@@ -17,7 +16,7 @@ class Support(IndicatorInterface):
         self.min_len_support = min_len_support
         self.supports = []
 
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface] = None):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface] = None):
         """
         Calcule les niveaux de support et les points à tracer.
         """

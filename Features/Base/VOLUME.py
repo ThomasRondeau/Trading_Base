@@ -1,8 +1,7 @@
 import pandas as pd
-from Features.FeatureID import FeatureID
-from Features.IndicatorInterface import IndicatorInterface
+from Features import *
 
-class VOLUME(IndicatorInterface):
+class VOLUME(FeatureInterface):
     """
     Simple Moving Average (SMA) Indicator
     """
@@ -15,7 +14,7 @@ class VOLUME(IndicatorInterface):
         self.Volume_ma = None
         self.Volume_ratio = None
 
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface] = None):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface] = None):
         """
         Calculate the Simple Moving Average for the given data.
         

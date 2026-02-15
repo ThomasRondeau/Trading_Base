@@ -1,8 +1,7 @@
 import pandas as pd
-from Features.FeatureID import FeatureID
-from Features.IndicatorInterface import IndicatorInterface
+from Features import *
 
-class MACD(IndicatorInterface):
+class MACD(FeatureInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), short_window: int = 12, long_window: int = 26, signal_window: int = 9):
         """
         Initialise le calculateur MACD avec les données fournies.
@@ -20,7 +19,7 @@ class MACD(IndicatorInterface):
         self.signal_line = None
         self.macd_histogram = None
 
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface] = None):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface] = None):
         """
         Calcule le MACD et la ligne de signal, et les ajoute aux attributs `self.macd` et `self.signal_line`.
         """

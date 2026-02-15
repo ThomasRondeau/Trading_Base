@@ -1,8 +1,7 @@
 import pandas as pd
-from Features.FeatureID import FeatureID
-from Features.IndicatorInterface import IndicatorInterface
+from Features import *
 
-class BollingerBands(IndicatorInterface):
+class BollingerBands(FeatureInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), window : int = 20, num_std_dev : int = 2):
         self.data = data
         self.window = window
@@ -14,7 +13,7 @@ class BollingerBands(IndicatorInterface):
         self.width = None
         self.position = None
 
-    def calculate(self, resolved_dependencies: dict[FeatureID, IndicatorInterface] = None):
+    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface] = None):
         self.sma = self.data['close'].rolling(window=self.window).mean()
         self.std = self.data['close'].rolling(window=self.window).std()
         self.upper_band = self.sma + (self.num_std_dev * self.std)

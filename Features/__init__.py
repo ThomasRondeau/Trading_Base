@@ -7,7 +7,10 @@ from .Base.SMA import SMA
 from .Base.SUPPORT import Support
 from .Base.Vwap import Vwap
 from .Base.VOLUME import VOLUME
-from .IndicatorInterface import IndicatorInterface
-from .Models.AmplitudeIndicators import AmplitudeIndicators
+from .FeatureInterface import IndicatorInterface
+from .Models.AmplitudeFeatures import AmplitudeIndicators
 from .Models.OpportunityIndicators import OpportunityIndicators
-from .Models.DirectionIndicators import DirectionIndicators
+from .Models.DirectionFeatures import DirectionIndicators
+from .FeatureID import FeatureID
+from .FeatureInterface import FeatureInterface
+from .FeatureManager import FeatureManager
