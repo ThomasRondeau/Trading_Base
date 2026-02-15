@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from Features.FeatureID import FeatureID
-from Indicators.IndicatorInterface import IndicatorInterface
+from Features.IndicatorInterface import IndicatorInterface
 
 class Vwap(IndicatorInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), std_multiplier: float = 3):

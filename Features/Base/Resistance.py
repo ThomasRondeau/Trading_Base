@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from Features.FeatureID import FeatureID
-from Indicators.IndicatorInterface import IndicatorInterface
+from Features.IndicatorInterface import IndicatorInterface
 
 class Resistance(IndicatorInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), window: int = 10, min_len_resistance : int = 50):

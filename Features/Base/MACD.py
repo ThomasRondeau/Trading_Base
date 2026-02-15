@@ -1,6 +1,6 @@
 import pandas as pd
 from Features.FeatureID import FeatureID
-from Indicators.IndicatorInterface import IndicatorInterface
+from Features.IndicatorInterface import IndicatorInterface
 
 class MACD(IndicatorInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), short_window: int = 12, long_window: int = 26, signal_window: int = 9):

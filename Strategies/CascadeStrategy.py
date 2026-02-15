@@ -8,7 +8,7 @@ from Features.TargetID import TargetID
 from Models import AmplitudeModel, DirectionModel, OpportunityModel
 from Strategies.TradingStrategyInterface import TradingStrategyInterface
 from typing import Dict, Any
-from Indicators import *
+from Features import *
 from Targets import *
 
 class CascadeStrategy(TradingStrategyInterface):

@@ -5,7 +5,7 @@ from Features.TargetID import TargetID
 from Features.FeatureID import FeatureID
 from Features.FeatureManager import FeatureManager
 from Features.TargetManager import TargetManager
-from Indicators import *
+from Features import *
 from Targets import *
 from Models.TradingModelInterface import TradingModelInterface
 import numpy as np

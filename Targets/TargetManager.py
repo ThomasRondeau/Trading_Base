@@ -1,6 +1,6 @@
 import pandas as pd
 from typing import Dict, Set, Type, Any
-from Features.TargetID import TargetID
+from Targets.TargetID import TargetID
 from Targets.TargetInterface import TargetInterface
 
 

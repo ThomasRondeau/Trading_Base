@@ -1,6 +1,6 @@
 import pandas as pd
 from Features.FeatureID import FeatureID
-from Indicators.IndicatorInterface import IndicatorInterface
+from Features.IndicatorInterface import IndicatorInterface
 
 class Support(IndicatorInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), window: int = 10, min_len_support : int = 50):

@@ -1,6 +1,6 @@
 import pandas as pd
 from Features.FeatureID import FeatureID
-from Indicators.IndicatorInterface import IndicatorInterface
+from Features.IndicatorInterface import IndicatorInterface
 
 class BollingerBands(IndicatorInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), window : int = 20, num_std_dev : int = 2):

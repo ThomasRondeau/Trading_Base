@@ -8,7 +8,7 @@ import warnings
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 from Connections.Trading_App import TradingApp
-from Indicators import *
+from Features import *
 
 
 def main():

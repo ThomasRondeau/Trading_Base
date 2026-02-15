@@ -1,7 +1,7 @@
 from typing import cast
 import pandas as pd
 from Features.FeatureID import FeatureID
-from Indicators import *
+from Features import *
 
 class OpportunityIndicators(IndicatorInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame()):

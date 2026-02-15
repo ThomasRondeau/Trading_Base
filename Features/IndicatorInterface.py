@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any
 import pandas as pd
-from Indicators import IndicatorInterface
+from Features import IndicatorInterface
 from Features.FeatureID import FeatureID
 
 class IndicatorInterface(ABC):

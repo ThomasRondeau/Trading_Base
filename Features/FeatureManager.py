@@ -1,7 +1,7 @@
 import pandas as pd
 from typing import Dict, Set, Type, Any
 from Features.FeatureID import FeatureID
-from Indicators.IndicatorInterface import IndicatorInterface
+from Features.IndicatorInterface import IndicatorInterface
 
 
 class FeatureManager:
