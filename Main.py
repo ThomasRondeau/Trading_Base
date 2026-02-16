@@ -7,7 +7,7 @@ import numpy as np
 import warnings
 import matplotlib.pyplot as plt
 import mplfinance as mpf
-from Connections.Trading_App import TradingApp
+from Connections.TradingApp import TradingApp
 from Features import *
 
 

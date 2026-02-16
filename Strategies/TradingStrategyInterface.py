@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any
+from Types import *
 
 class TradingStrategyInterface(ABC):
     """
@@ -32,7 +33,7 @@ class TradingStrategyInterface(ABC):
         pass
 
     @abstractmethod
-    def run(self) -> None:
+    def on_bar(self, bar) -> list[Order]:
         """Exécute la stratégie de trading."""
         pass
     

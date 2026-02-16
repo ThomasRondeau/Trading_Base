@@ -2,7 +2,7 @@ import time
 import threading
 import traceback
 
-from Connections.Trading_App import TradingApp
+from Connections.TradingApp import TradingApp
 from Strategies.CascadeStrategy import CascadeStrategy
 
 

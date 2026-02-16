@@ -1,5 +1,5 @@
-from Targets.TargetInterface import TargetInterface
-from Features.TargetID import TargetID
+from Targets import *
+from Features import *
 import pandas as pd
 
 

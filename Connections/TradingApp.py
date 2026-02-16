@@ -15,7 +15,22 @@ from ibapi.ticktype import TickTypeEnum
 
 
 class TradingApp(EClient, EWrapper):
+
+    _instance : Optional['TradingApp'] = None
+
+    
+    @classmethod
+    def get_instance(cls) -> 'TradingApp':
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+
     def __init__(self) -> None:
+
+        if TradingApp._instance is not None:
+            raise Exception("Use get_instance() instead")
+        
         EClient.__init__(self, self)
         self.data: Dict[int, pd.DataFrame] = {}
         self.nextOrderId: Optional[int] = None

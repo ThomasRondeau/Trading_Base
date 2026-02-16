@@ -1,11 +1,12 @@
 from datetime import datetime, time, timedelta
 import pandas as pd
-from Connections.Trading_App import TradingApp
+from Connections.TradingApp import TradingApp
 from Models import AmplitudeModel, DirectionModel, OpportunityModel
 from Strategies.TradingStrategyInterface import TradingStrategyInterface
 from typing import Dict, Any
 from Features import *
 from Targets import *
+from Types import *
 
 class CascadeStrategy(TradingStrategyInterface):
     """
@@ -23,54 +24,16 @@ class CascadeStrategy(TradingStrategyInterface):
 
         self.featureManager = FeatureManager()
         self.targetManager = TargetManager()
-        self.trading_app = tradingApp
 
         # Initialisation des modèles de trading
         self.AmplitudeModel = AmplitudeModel()
         self.DirectionModel = DirectionModel()
         self.OpportunityModel = OpportunityModel()
+
         self.training_data_shift = 30
 
-    def collect_training_data(self, symbol: str, days_back: int = 1) -> pd.DataFrame:
 
-        print(f"Collecte des données d'entraînement pour {symbol} sur {days_back} jours...")
-        
-        all_data = []
-        contract = TradingApp.get_contract(symbol)
-        
-        # Récupération des données jour par jour
-        for day in range(1, days_back + 1):
-            try:
-                # Calcul de la date pour ce jour
-                target_date = datetime.now() - timedelta(days=day)
-                date_str = target_date.strftime("%Y%m%d 20:00:00 US/Eastern")
-                
-                # Récupération des données pour ce jour
-                daily_data = self.trading_app.get_historical_data(99, contract, end_date=date_str)
-                
-                if not daily_data.empty:
-                    daily_data['date'] = target_date.date()
-                    all_data.append(daily_data)
-                    print(f"Données récupérées pour {target_date.date()}: {len(daily_data)} points")
-                else:
-                    print(f"Pas de données pour {target_date.date()}")
-                    
-            except Exception as e:
-                print(f"Erreur lors de la récupération des données pour {target_date.date()}: {e}")
-                continue
-        
-        if not all_data:
-            raise ValueError("Aucune donnée n'a pu être récupérée")
-        
-        # Consolidation des données
-        consolidated_data = pd.concat(all_data, ignore_index=True)
-        consolidated_data = consolidated_data.sort_values(by='date').reset_index(drop=True)
-        
-        print(f"Données consolidées: {len(consolidated_data)} points sur {len(all_data)} jours")
-        
-        return consolidated_data
-
-    def train(self) -> None:
+    def train(self, training_data: pd.DataFrame) -> None:
         """
         Entraîne les modèles de la stratégie avec les données d'entraînement.
 
@@ -108,8 +71,6 @@ class CascadeStrategy(TradingStrategyInterface):
 
         self.targetManager.clear_cache()
 
-
-        training_data = self.collect_training_data("SPY", days_back=1)
         training_data_features = training_data.copy().iloc[:-self.training_data_shift]
         self.featureManager.update(training_data_features)
         self.targetManager.update(training_data, training_data_shift=self.training_data_shift)
@@ -134,7 +95,7 @@ class CascadeStrategy(TradingStrategyInterface):
         pass
 
 
-    def run(self) -> None:
+    def on_bar(self, bar) -> list[Order]:
         """
         Exécute la stratégie de trading.
         """
@@ -210,3 +171,4 @@ class CascadeStrategy(TradingStrategyInterface):
         :return: Dictionnaire contenant l'état de la stratégie.
         """
         return "CascadeStrategy is running"
+    
