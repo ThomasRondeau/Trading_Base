@@ -34,7 +34,7 @@ class BacktestOrderManager:
 
         for order in self.pending_orders:
             print(f"Traitement de l'ordre: {order}")
-
+            
             
             pass
         

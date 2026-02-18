@@ -7,7 +7,7 @@ class DataManager:
     def __init__(self):
         pass
 
-    def collect_training_data(self, symbol: str, days_back: int) -> pd.DataFrame:
+    def collect_training_data(self, symbol: str, days_back: int, until : int) -> pd.DataFrame:
 
         print(f"Collecte des données d'entraînement pour {symbol} sur {days_back} jours...")
         trading_app = TradingApp.get_instance()
@@ -15,7 +15,7 @@ class DataManager:
         contract = TradingApp.get_contract(symbol)
         
         # Récupération des données jour par jour
-        for day in range(1, days_back + 1):
+        for day in range(until + 1, days_back + 1):
             try:
                 # Calcul de la date pour ce jour
                 target_date = datetime.now() - datetime.timedelta(days=day)

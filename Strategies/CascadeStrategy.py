@@ -14,7 +14,7 @@ class CascadeStrategy(TradingStrategyInterface):
     Cette stratégie exécute des actions de trading en fonction des signaux fournis par les modèles.
     """
 
-    def __init__(self, tradingApp : TradingApp) -> None:
+    def __init__(self) -> None:
         """
         Initialise la stratégie avec les modèles nécessaires.
 
