@@ -1,10 +1,6 @@
 from typing import Any, Dict, Set, cast
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import TimeSeriesSplit
-from Features.TargetID import TargetID
-from Features.FeatureID import FeatureID
-from Features.FeatureManager import FeatureManager
-from Features.TargetManager import TargetManager
 from Features import *
 from Targets import *
 from Models.TradingModelInterface import TradingModelInterface
@@ -45,7 +41,7 @@ class DirectionModel(TradingModelInterface):
         """
         Construit X et y à partir du FeatureManager et TargetManager.
         """
-        Indicator = cast(DirectionIndicators, self.feature_manager.get_feature(FeatureID.DIRECTION))
+        Indicator = cast(DirectionFeatures, self.feature_manager.get_feature(FeatureID.DIRECTION))
         Target = cast(Target_Direction, self.target_manager.get_target(TargetID.DIRECTION))
 
         df = pd.DataFrame({
@@ -120,7 +116,7 @@ class DirectionModel(TradingModelInterface):
         """
         Prédit la direction ('UP' ou 'DOWN') sur la dernière observation.
         """
-        Indicator = cast(DirectionIndicators, self.feature_manager.get_feature(FeatureID.DIRECTION))
+        Indicator = cast(DirectionFeatures, self.feature_manager.get_feature(FeatureID.DIRECTION))
         
         feature_array = np.array([[
             Indicator.rsi_momentum.iloc[-1],

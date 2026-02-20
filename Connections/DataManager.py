@@ -1,47 +1,82 @@
 import pandas as pd
-import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from Connections.TradingApp import TradingApp
 
 
 class DataManager:
     def __init__(self):
-        pass
+        self.cache_dir = Path(__file__).parent
+    
+    def _get_cache_path(self, symbol: str) -> Path:
+        return self.cache_dir / f"{symbol}_historical_data.csv"
 
-    def collect_training_data(self, symbol: str, days_back: int, until : int) -> pd.DataFrame:
+    def _load_cache(self, symbol: str) -> pd.DataFrame:
+        cache_path = self._get_cache_path(symbol)
+        if cache_path.exists():
+            df = pd.read_csv(cache_path, parse_dates=['date'])
+            df['date'] = pd.to_datetime(df['date']).dt.date
+            return df
+        return pd.DataFrame()
 
+    def _save_cache(self, symbol: str, data: pd.DataFrame):
+        cache_path = self._get_cache_path(symbol)
+        data.to_csv(cache_path, index=False)
+
+    def collect_training_data(self, symbol: str, days_back: int, until: int = 0) -> pd.DataFrame:
         print(f"Collecte des données d'entraînement pour {symbol} sur {days_back} jours...")
-        trading_app = TradingApp.get_instance()
-        all_data = []
-        contract = TradingApp.get_contract(symbol)
         
-        # Récupération des données jour par jour
+        cached_data = self._load_cache(symbol)
+        cached_dates = set(cached_data['date'].tolist()) if not cached_data.empty else set()
+
+        trading_app = TradingApp.get_instance()
+        contract = TradingApp.get_contract(symbol)
+        all_data = [cached_data] if not cached_data.empty else []
+        new_data_fetched = False
+
         for day in range(until + 1, days_back + 1):
             try:
-                # Calcul de la date pour ce jour
-                target_date = datetime.now() - datetime.timedelta(days=day)
+                target_date = datetime.now() - timedelta(days=day)
+                target_date_only = target_date.date()
+
+                # Données déjà en cache pour ce jour
+                if target_date_only in cached_dates:
+                    print(f"Cache hit pour {target_date_only}")
+                    continue
+
                 date_str = target_date.strftime("%Y%m%d 20:00:00 US/Eastern")
-                
-                # Récupération des données pour ce jour
                 daily_data = trading_app.get_historical_data(99, contract, end_date=date_str)
-                
+
                 if not daily_data.empty:
-                    daily_data['date'] = target_date.date()
+                    daily_data['date'] = target_date_only
                     all_data.append(daily_data)
-                    print(f"Données récupérées pour {target_date.date()}: {len(daily_data)} points")
+                    new_data_fetched = True
+                    print(f"Données récupérées pour {target_date_only}: {len(daily_data)} points")
                 else:
-                    print(f"Pas de données pour {target_date.date()}")
-                    
+                    print(f"Pas de données pour {target_date_only}")
+
             except Exception as e:
                 print(f"Erreur lors de la récupération des données pour {target_date.date()}: {e}")
                 continue
-        
+
         if not all_data:
             raise ValueError("Aucune donnée n'a pu être récupérée")
-        
-        # Consolidation des données
+
         consolidated_data = pd.concat(all_data, ignore_index=True)
         consolidated_data = consolidated_data.sort_values(by='date').reset_index(drop=True)
-        
-        print(f"Données consolidées: {len(consolidated_data)} points sur {len(all_data)} jours")
-        
+
+        # Sauvegarde uniquement si de nouvelles données ont été récupérées
+        if new_data_fetched:
+            self._save_cache(symbol, consolidated_data)
+            print(f"Cache mis à jour : {self._get_cache_path(symbol)}")
+
+        # Filtrage sur la plage demandée
+        min_date = (datetime.now() - timedelta(days=days_back)).date()
+        max_date = (datetime.now() - timedelta(days=until)).date()
+        consolidated_data = consolidated_data[
+            (consolidated_data['date'] >= min_date) &
+            (consolidated_data['date'] <= max_date)
+        ]
+
+        print(f"Données consolidées: {len(consolidated_data)} points sur {days_back - until} jours")
         return consolidated_data

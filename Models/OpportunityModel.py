@@ -2,10 +2,6 @@ from typing import Any, Dict, Set, cast
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import TimeSeriesSplit
-from Features.TargetID import TargetID
-from Features.FeatureID import FeatureID
-from Features.FeatureManager import FeatureManager
-from Features.TargetManager import TargetManager
 from Features import *
 from Targets import *
 from Models.TradingModelInterface import TradingModelInterface
@@ -43,7 +39,7 @@ class OpportunityModel(TradingModelInterface):
         """
         Construit X et y à partir du FeatureManager et TargetManager.
         """
-        Indicator = cast(OpportunityIndicators, self.feature_manager.get_feature(FeatureID.OPPORTUNITY))
+        Indicator = cast(OpportunityFeatures, self.feature_manager.get_feature(FeatureID.OPPORTUNITY))
         Target = cast(Target_Opportunity, self.target_manager.get_target(TargetID.OPPORTUNITY))
 
         df = pd.DataFrame({
@@ -112,7 +108,7 @@ class OpportunityModel(TradingModelInterface):
         """
         Prédit s'il y a une opportunité de trade sur la dernière observation.
         """
-        Indicator = cast(OpportunityIndicators, self.feature_manager.get_feature(FeatureID.OPPORTUNITY))
+        Indicator = cast(OpportunityFeatures, self.feature_manager.get_feature(FeatureID.OPPORTUNITY))
         
         feature_array = np.array([[
             Indicator.volatility_compression.iloc[-1],

@@ -28,17 +28,17 @@ def main():
     print("Connected to TWS/IB Gateway")
 
 
-    #ICI QUE JE DOIS ECIRER LE CODE DE BACKTESTING
+    #ICI QUE JE DOIS ECIRER LE CODE DE BACKTESTING / TRADING
     try:
         cascadeStrategy = CascadeStrategy()
         BacktestingEngine = BacktestEngine()
         dataManager = DataManager()
 
-        training_data = dataManager.collect_training_data("AAPL", 30, 10)
-        backtest_data = dataManager.collect_training_data("AAPL", 10)
-        
+        training_data = dataManager.collect_training_data("AAPL", 10, 3)
+        backtest_data = dataManager.collect_training_data("AAPL", 3)
+
         BacktestingEngine.set_training_data(training_data)
-        BacktestingEngine.set_backtest_data("AAPL", 10)
+        BacktestingEngine.set_backtest_data(backtest_data)
         
 
         BacktestingEngine.add_strategy(cascadeStrategy)

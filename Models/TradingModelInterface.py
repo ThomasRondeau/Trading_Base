@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Set
 
-from Features import FeatureManager, TargetManager
-from Features.FeatureID import FeatureID
+from Features import *
+from Targets import *
 
 
 class TradingModelInterface(ABC):

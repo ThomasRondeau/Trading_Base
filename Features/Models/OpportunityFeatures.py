@@ -2,7 +2,7 @@ from typing import cast
 import pandas as pd
 from Features import *
 
-class OpportunityIndicators(FeatureInterface):
+class OpportunityFeatures(FeatureInterface):
     def __init__(self, data: pd.DataFrame = pd.DataFrame()):
 
         self.data = data

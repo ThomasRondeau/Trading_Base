@@ -27,7 +27,7 @@ class FeatureInterface(ABC):
         return []
 
     @abstractmethod
-    def calculate(self, resolved_dependencies: dict[FeatureID, FeatureInterface] = None):
+    def calculate(self, resolved_dependencies: dict[FeatureID, "FeatureInterface"] = None):
         """
         Calcule la valeur de l'indicateur.
         

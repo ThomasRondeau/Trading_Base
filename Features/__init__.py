@@ -1,3 +1,6 @@
+from .FeatureID import FeatureID
+from .FeatureInterface import FeatureInterface
+
 from .Base.ATR import ATR
 from .Base.BollingerBands import BollingerBands
 from .Base.MACD import MACD
@@ -7,10 +10,9 @@ from .Base.SMA import SMA
 from .Base.SUPPORT import Support
 from .Base.Vwap import Vwap
 from .Base.VOLUME import VOLUME
-from .FeatureInterface import IndicatorInterface
-from .Models.AmplitudeFeatures import AmplitudeIndicators
-from .Models.OpportunityIndicators import OpportunityIndicators
-from .Models.DirectionFeatures import DirectionIndicators
-from .FeatureID import FeatureID
-from .FeatureInterface import FeatureInterface
+
+from .Models.AmplitudeFeatures import AmplitudeFeatures
+from .Models.OpportunityFeatures import OpportunityFeatures
+from .Models.DirectionFeatures import DirectionFeatures
+
 from .FeatureManager import FeatureManager

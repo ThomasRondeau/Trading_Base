@@ -2,8 +2,6 @@ from typing import Any, Dict, Set, cast
 from sklearn.metrics import r2_score
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import TimeSeriesSplit
-from Features.FeatureID import FeatureID
-from Features.FeatureManager import FeatureManager
 from Features import *
 from Targets import *
 from Models.TradingModelInterface import TradingModelInterface
@@ -40,7 +38,7 @@ class AmplitudeModel(TradingModelInterface):
         """
         Construit X et Y à partir du FeatureManager et TargetManager.
         """
-        Indicator = cast(AmplitudeIndicators, self.feature_manager.get_feature(FeatureID.AMPLITUDE))
+        Indicator = cast(AmplitudeFeatures, self.feature_manager.get_feature(FeatureID.AMPLITUDE))
         Target = cast(Target_Amplitude, self.target_manager.get_target(TargetID.AMPLITUDE))
 
         df = pd.DataFrame({
@@ -108,7 +106,7 @@ class AmplitudeModel(TradingModelInterface):
         """
         Prédit l'amplitude du mouvement sur la dernière observation.
         """
-        Indicator = cast(AmplitudeIndicators, self.feature_manager.get_feature(FeatureID.AMPLITUDE))
+        Indicator = cast(AmplitudeFeatures, self.feature_manager.get_feature(FeatureID.AMPLITUDE))
         
         feature_array = np.array([[
             Indicator.current_volatility.iloc[-1],

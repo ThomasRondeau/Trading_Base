@@ -52,9 +52,9 @@ class CascadeStrategy(TradingStrategyInterface):
         self.featureManager.register_indicator(FeatureID.VOLUME, VOLUME(window=14))
 
         #Models Indicators
-        self.featureManager.register_indicator(FeatureID.AMPLITUDE, AmplitudeIndicators())
-        self.featureManager.register_indicator(FeatureID.DIRECTION, DirectionIndicators())
-        self.featureManager.register_indicator(FeatureID.OPPORTUNITY, OpportunityIndicators())
+        self.featureManager.register_indicator(FeatureID.AMPLITUDE, AmplitudeFeatures())
+        self.featureManager.register_indicator(FeatureID.DIRECTION, DirectionFeatures())
+        self.featureManager.register_indicator(FeatureID.OPPORTUNITY, OpportunityFeatures())
         
         self.featureManager.clear_cache()
 

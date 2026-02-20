@@ -19,9 +19,7 @@ class BacktestEngine:
         self.OrderManager = BacktestOrderManager()
         self.RiskManager = RiskManager()
 
-        #Data parameters
-        self.symbol : str = None
-        self.days_back : int = None
+        # Data 
         self.trainging_data : pd.DataFrame = None
         self.backtest_data : pd.DataFrame = None
 
@@ -30,12 +28,10 @@ class BacktestEngine:
         self.strategies.append(strategy)
         print(f"Strategy {strategy.__class__.__name__} added to engine.")
 
-    
-    def set_backtest_data(self, symbol: str, days_back: int):
-        self.symbol = symbol
-        self.days_back = days_back
-        self.trainging_data, self.backtest_data = self.trading_app.get_historical_data(symbol, days_back)
-        print(f"Backtest data set for {symbol} with {len(self.backtest_data)} bars.")
+
+    def set_backtest_data(self, backtest_data: pd.DataFrame):
+        self.backtest_data = backtest_data
+        print(f"Backtest data set with {len(backtest_data)} bars.")
 
     def set_training_data(self, training_data: pd.DataFrame):
         self.trainging_data = training_data

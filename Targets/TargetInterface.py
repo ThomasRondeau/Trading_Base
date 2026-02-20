@@ -23,7 +23,7 @@ class TargetInterface:
         return []
 
     @abstractmethod
-    def calculate(self, resolved_dependencies: dict[TargetID, TargetInterface] = None) -> None:
+    def calculate(self, resolved_dependencies: dict[TargetID, "TargetInterface"] = None) -> None:
         """
         Calcule la valeur de l'indicateur.
         
