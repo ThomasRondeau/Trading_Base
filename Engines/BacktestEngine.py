@@ -44,30 +44,34 @@ class BacktestEngine:
         for strategy in self.strategies:
             strategy.train(self.trainging_data)
 
+    def test_strategies(self):
+        for strategy in self.strategies:
+            strategy.test()
+
         
     def run(self):
         if self.backtest_data is None or self.strategies is None or len(self.strategies) == 0:
             raise ValueError("Data and strategies must be set before running the backtest.")
         
-        print(f"BacktestEngine started with {len(self.strategies)} strategies.")
+        print(f"BacktestEngine started with {', '.join(strategy.name for strategy in self.strategies)} strategies.")
         self.IsRunning = True
 
         for strategy in self.strategies:
-            strategy.update_status()
+            strategy.update_status(True)
 
-        for timestamp, bar in enumerate(self.backtest_data):
+
+        for timestamp, bar in self.backtest_data.iterrows():
             orders = []
             for strategy in self.strategies:
-                orders.extend(strategy.on_data(bar))
+                orders.extend(strategy.on_bar(bar))
                 
-                orders = self.OrderManager.aggregate_and_net(orders)
-                self.OrderManager.process_orders(orders, self.Portfolio, self.OrderBook)
+            if orders:
+                print(f"Generated {len(orders)} orders at timestamp {timestamp}.")
+                print(orders)
+                #orders = self.OrderManager.aggregate_and_net(orders)
+                #self.OrderManager.process_orders(orders, self.Portfolio, self.OrderBook)
 
 
     def stop(self):
         self.IsRunning = False
         print(f"BacktestEngine stopped.")
-
-        
-    
-

@@ -11,6 +11,7 @@ class TradingStrategyInterface(ABC):
         """
         Initialise la stratégie de trading.
         """
+        self.name = self.__class__.__name__
         pass
 
     @abstractmethod
@@ -29,6 +30,13 @@ class TradingStrategyInterface(ABC):
 
         :param test_data: Dictionnaire contenant les données de test.
         :return: Dictionnaire contenant les résultats des tests.
+        """
+        pass
+
+    @abstractmethod
+    def update_status(self, is_running: bool) -> None:
+        """
+        Met à jour l'état de la stratégie de trading.
         """
         pass
 

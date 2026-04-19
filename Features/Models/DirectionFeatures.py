@@ -45,17 +45,18 @@ class DirectionFeatures(FeatureInterface):
         if not Atr or not Sma_20 or not Bollinger_Bands or not Rsi or not Macd or not Volume:
             raise ValueError("Erreur dans DirectionFeatures : Les dépendances nécessaires ne sont pas résolues.")
 
+        close_prices = pd.to_numeric(self.data['close'], errors='coerce')
 
         self.rsi_momentum = (Rsi.rsi > 50 ).astype(int)
         self.macd_momentum = (Macd.macd > Macd.signal_line).astype(int)
-        self.price_vs_sma = (self.data['close'] > Sma_20.sma).astype(int)
+        self.price_vs_sma = (close_prices > Sma_20.sma).astype(int)
         self.sma_slope = Sma_20.sma.diff(5)
-        self.price_position = (self.data['close'] - Sma_20.sma) / Atr.atr
-        self.upper_breakout = (self.data['close'] > Bollinger_Bands.upper_band).astype(int)
-        self.lower_breakout = (self.data['close'] < Bollinger_Bands.lower_band).astype(int)
+        self.price_position = (close_prices - Sma_20.sma) / Atr.atr
+        self.upper_breakout = (close_prices > Bollinger_Bands.upper_band).astype(int)
+        self.lower_breakout = (close_prices < Bollinger_Bands.lower_band).astype(int)
         self.bullish_confluence = (self.rsi_momentum & self.macd_momentum & self.price_vs_sma).astype(int)
         self.bearish_confluence = ((1 - self.rsi_momentum) & (1 - self.macd_momentum) & (1 - self.price_vs_sma)).astype(int)
-        self.volume_price_trend = Volume.Volume_ratio * np.sign(self.data['close'].pct_change())
+        self.volume_price_trend = Volume.Volume_ratio * np.sign(close_prices.pct_change())
 
 
     def update(self, new_data: pd.DataFrame):

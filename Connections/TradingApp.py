@@ -71,8 +71,8 @@ class TradingApp(EClient, EWrapper):
             print("Erreur: Non connecté à TWS/IB Gateway")
             return pd.DataFrame()
 
-        self.data[reqId] = pd.DataFrame(columns=["time", "high", "low", "open", "close", "volume"])
-        self.data[reqId].set_index("time", inplace=True)
+        self.data[reqId] = pd.DataFrame(columns=["Datetime", "high", "low", "open", "close", "volume"])
+        self.data[reqId].set_index("Datetime", inplace=True)
         
         # Si pas de date spécifiée, utiliser la date d'aujourd'hui à 16:00 (fermeture marché US)
         if not end_date:
@@ -89,8 +89,8 @@ class TradingApp(EClient, EWrapper):
             durationStr="1 D",
             barSizeSetting="1 min",
             whatToShow="TRADES",  # TRADES au lieu de MIDPOINT pour plus de données
-            useRTH=1,  # 0 = inclut pré/post marché, 1 = heures régulières seulement
-            formatDate=2,
+            useRTH=2,  # 0 = inclut pré/post marché, 1 = heures régulières seulement
+            formatDate=2,  # 1 = format lisible, 2 = timestamp
             keepUpToDate=False,
             chartOptions=[],
         )
@@ -137,9 +137,10 @@ class TradingApp(EClient, EWrapper):
                 print(f"Erreur de conversion de date: {bar.date}")
                 return
         
-        df.loc[date_index, ["high", "low", "open", "close", "volume"]] = [bar.high, bar.low, bar.open, bar.close, bar.volume]
+        df.loc[date_index, ["high", "low", "open", "close", "volume"]] = [
+            float(bar.high), float(bar.low), float(bar.open), float(bar.close), float(bar.volume)
+        ]
         
-        df = df.astype(float)
         self.data[reqId] = df
 
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:

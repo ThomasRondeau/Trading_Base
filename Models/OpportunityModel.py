@@ -1,6 +1,6 @@
 from typing import Any, Dict, Set, cast
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import balanced_accuracy_score
 from sklearn.model_selection import TimeSeriesSplit
 from Features import *
 from Targets import *
@@ -26,7 +26,8 @@ class OpportunityModel(TradingModelInterface):
                 n_estimators=200,
                 max_depth=8,
                 random_state=42,
-                n_jobs=-1
+                n_jobs=-1,
+                class_weight='balanced'
             )
 
     def setFeatureManager(self, feature_manager : FeatureManager) -> None:
@@ -77,7 +78,7 @@ class OpportunityModel(TradingModelInterface):
         Retourne une accuracy.
         """
         X, y = self._build_dataset()
-        return accuracy_score(y, self.model.predict(X))
+        return balanced_accuracy_score(y, self.model.predict(X))
 
     def cross_validate(self, n_splits: int = 5) -> tuple[float, list[float]]:
         """
@@ -96,11 +97,12 @@ class OpportunityModel(TradingModelInterface):
                 n_estimators=200,
                 max_depth=8,
                 random_state=42,
-                n_jobs=-1
+                n_jobs=-1,
+                class_weight='balanced'
             )
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
-            scores.append(accuracy_score(y_test, y_pred))
+            scores.append(balanced_accuracy_score(y_test, y_pred))
 
         return float(np.mean(scores)), scores
 
@@ -125,8 +127,9 @@ class OpportunityModel(TradingModelInterface):
         
         prediction = self.model.predict(feature_array)[0]
         
+        # print(f"OpportunityModel prediction: {prediction} (1=opportunity, 0=no opportunity)")
+        
         if prediction == 1:
             return True
         
         return False 
-

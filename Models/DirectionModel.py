@@ -103,7 +103,6 @@ class DirectionModel(TradingModelInterface):
                 learning_rate=0.1,
                 random_state=42,
                 n_jobs=-1,
-                use_label_encoder=False,
                 eval_metric="logloss"
             )
             model.fit(X_train, y_train)

@@ -41,17 +41,18 @@ class AmplitudeFeatures(FeatureInterface):
         if not Atr or not Sma_20 or not Bollinger_Bands or not Rsi or not Macd or not Volume:
             raise ValueError("Erreur dans AmplitudeFeatures : Les dépendances nécessaires ne sont pas résolues.")
 
+        close_prices = pd.to_numeric(self.data['close'], errors='coerce')
 
-        self.current_volatility = Atr.atr / self.data['close']
+        self.current_volatility = Atr.atr / close_prices
         self.volatility_percentile = Atr.atr.rolling(window=50).rank(pct=True)
-        self.distance_to_sma = abs(self.data['close'] - Sma_20.sma) / self.data['close']
+        self.distance_to_sma = abs(close_prices - Sma_20.sma) / close_prices
         self.distance_to_bb = np.minimum(
-            abs(self.data['close'] - Bollinger_Bands.upper_band),
-            abs(self.data['close'] - Bollinger_Bands.lower_band)
-        ) / self.data['close']
+            abs(close_prices - Bollinger_Bands.upper_band),
+            abs(close_prices - Bollinger_Bands.lower_band)
+        ) / close_prices
         self.rsi_extreme = np.maximum(Rsi.rsi - 70, 30 - Rsi.rsi).clip(0)
         self.macd_intensity = abs(Macd.macd_histogram) / Atr.atr
-        self.momentum_strength = abs(self.data['close'].pct_change(5))
+        self.momentum_strength = abs(close_prices.pct_change(5))
         self.volume_intensity = Volume.Volume_ratio - self.current_volatility
 
         #Il va falloir que je fasse un create labels pour que le modèle apprenne les features en fonction des targets 

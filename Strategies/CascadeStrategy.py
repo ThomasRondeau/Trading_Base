@@ -20,7 +20,11 @@ class CascadeStrategy(TradingStrategyInterface):
 
         :param models: Dictionnaire contenant les modèles de trading.
         """
+        super().__init__()
         self.IsRunning = False
+        self.strategy_id = 1
+        self.symbol = "AAPL"
+        self.min_amplitude_threshold = 0.5
 
         self.featureManager = FeatureManager()
         self.targetManager = TargetManager()
@@ -31,6 +35,7 @@ class CascadeStrategy(TradingStrategyInterface):
         self.OpportunityModel = OpportunityModel()
 
         self.training_data_shift = 30
+        self.current_data = pd.DataFrame()
 
 
     def train(self, training_data: pd.DataFrame) -> None:
@@ -71,8 +76,8 @@ class CascadeStrategy(TradingStrategyInterface):
 
         self.targetManager.clear_cache()
 
-        training_data_features = training_data.copy().iloc[:-self.training_data_shift]
-        self.featureManager.update(training_data_features)
+        self.current_data = training_data.copy().iloc[:-self.training_data_shift]
+        self.featureManager.update(self.current_data)
         self.targetManager.update(training_data, training_data_shift=self.training_data_shift)
         
         self.AmplitudeModel.setFeatureManager(self.featureManager)
@@ -92,45 +97,51 @@ class CascadeStrategy(TradingStrategyInterface):
 
         :param test_data: Dictionnaire contenant les données de test.
         """
-        pass
+        amplitude_accuracy = self.AmplitudeModel.test()
+        direction_accuracy = self.DirectionModel.test()
+        opportunity_accuracy = self.OpportunityModel.test()
+
+        amplitude_cv, _ = self.AmplitudeModel.cross_validate()
+        direction_cv, _ = self.DirectionModel.cross_validate()
+        opportunity_cv, _ = self.OpportunityModel.cross_validate()
+
+        print(f"\n--- Résultats de l'évaluation ---")
+        print(f"Amplitude Model   | Train R2: {amplitude_accuracy:.2f} | CV R2: {amplitude_cv:.2f}")
+        print(f"Direction Model   | Train Acc: {direction_accuracy:.2f} | CV Acc: {direction_cv:.2f}")
+        print(f"Opportunity Model | Train Acc: {opportunity_accuracy:.2f} | CV Acc: {opportunity_cv:.2f}")
+        print(f"Note: Un score sur le train proche de 1.0 indique que le modèle a mémorisé les données par cœur. Fiez-vous aux scores de validation croisée (CV).\n")
 
 
     def on_bar(self, bar) -> list[Order]:
         """
         Exécute la stratégie de trading.
         """
-        if self.IsRunning:
-            raise RuntimeError("La stratégie est déjà en cours d'exécution.")
+        if not self.IsRunning:
+            raise RuntimeError("La stratégie doit être lancée.")
+
+        # 1. Mise à jour de l'historique de données avec la nouvelle bougie (bar)
+        self.current_data = pd.concat([self.current_data, bar.to_frame().T])
         
-        self.IsRunning = True
+        # 2. Mise à jour des indicateurs pour pouvoir prédire sur cette nouvelle bougie
+        self.featureManager.update(self.current_data)
 
         # Implémentation de la logique de la stratégie en cascade
-
         # 1. Y a-t-il une opportunité ?
         has_opportunity = self.OpportunityModel.predict()
-        
+
         if not has_opportunity:
-            return {
-                'action': 'HOLD',
-                'confidence': 0.0,
-                'expected_return': 0.0,
-                'reasoning': "Pas d'opportunité détectée (mouvement insuffisant attendu)"
-            }
+            return []
         
         # 2. Quelle direction ?
         direction = self.DirectionModel.predict()  # 1 pour UP ou 0 pour DOWN
         
         # 3. Quelle amplitude ?
         amplitude = self.AmplitudeModel.predict()  # en %
+        print(f"Predicted direction: {direction}, amplitude: {amplitude}%")
         
         # 4. Vérifier si l'amplitude justifie le trade
         if abs(amplitude) < self.min_amplitude_threshold:
-            return {
-                'action': 'HOLD',
-                'confidence': 0.5,
-                'expected_return': amplitude,
-                'reasoning': f"Opportunité détectée mais amplitude trop faible ({amplitude:.2f}%)"
-            }
+            return []
         
         # 5. Vérifier la cohérence direction/amplitude
         direction_matches_amplitude = (
@@ -140,21 +151,18 @@ class CascadeStrategy(TradingStrategyInterface):
         
         if not direction_matches_amplitude:
             # Conflit entre les modèles
-            return {
-                'action': 'HOLD',
-                'confidence': 0.3,
-                'expected_return': amplitude,
-                'reasoning': f"Conflit: Direction={direction} mais Amplitude={amplitude:.2f}%"
-            }
+            return []
         
         # 6. Tout est cohérent → Trade !
-        action = 'BUY' if direction == 'UP' else 'SELL'
+        side = 'BUY' if direction == 'UP' else 'SELL'
         
         # Confiance basée sur l'amplitude (plus c'est grand, plus on est confiant)
         confidence = min(abs(amplitude) / 5.0, 1.0)  # Plafond à 5%
 
+        # Quantité calculée à partir de la confiance (arbitraire ici, au minimum 1)
+        quantity = max(1, int(confidence * 10))
         
-        pass
+        return [Order(strategy_ID=self.strategy_id, symbol=self.symbol, side=side, quantity=quantity)]
 
 
     def stop(self):
@@ -163,12 +171,16 @@ class CascadeStrategy(TradingStrategyInterface):
         """
         self.IsRunning = False
     
-    
+
+    def update_status(self, is_running: bool) -> None:
+        self.IsRunning = is_running
+
+
     def get_status(self) -> str:
         """
         Retourne l'état actuel de la stratégie de trading.
 
         :return: Dictionnaire contenant l'état de la stratégie.
         """
-        return "CascadeStrategy is running"
+        return self.IsRunning
     

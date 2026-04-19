@@ -50,7 +50,6 @@ def main():
         print(traceback.format_exc())
     
 
-
     if app.connected:
         app.disconnect()
         print("Déconnexion")

@@ -44,6 +44,8 @@ class OpportunityFeatures(FeatureInterface):
         if not Atr or not Sma_5 or not Sma_20 or not Bollinger_Bands or not Rsi or not Macd or not Volume:
             raise ValueError("Erreur dans OpportunityFeatures : Les dépendances nécessaires ne sont pas résolues.")
 
+        close_prices = pd.to_numeric(self.data['close'], errors='coerce')
+
         self.volatility_compression = (Bollinger_Bands.width < Bollinger_Bands.width.rolling(window=10).mean()).astype(int)
         self.volatility_expansion = (Atr.atr > Atr.atr.shift(1) * 1.2).astype(int)
         self.volatility_change = Atr.atr.pct_change()
@@ -51,11 +53,11 @@ class OpportunityFeatures(FeatureInterface):
         self.volume_trend = Volume.Volume.rolling(window=5).mean() / Volume.Volume.rolling(window=20).mean()
         self.momentum_alignment = ((Macd.macd > Macd.signal_line) & 
                                    (Rsi.rsi > 50) & 
-                                   (self.data['close'] > Sma_5.sma)).astype(int)
-        self.near_support = (self.data['close'] < Bollinger_Bands.lower_band * 1.02).astype(int)
-        self.near_resistance = (self.data['close'] > Bollinger_Bands.upper_band * 0.98).astype(int)
-        self.close_to_sma = abs(self.data['close'] - Sma_20.sma) / Atr.atr
-        self.price_acceleration = self.data['close'].pct_change(2)
+                                   (close_prices > Sma_5.sma)).astype(int)
+        self.near_support = (close_prices < Bollinger_Bands.lower_band * 1.02).astype(int)
+        self.near_resistance = (close_prices > Bollinger_Bands.upper_band * 0.98).astype(int)
+        self.close_to_sma = abs(close_prices - Sma_20.sma) / Atr.atr
+        self.price_acceleration = close_prices.pct_change(2)
 
 
 
