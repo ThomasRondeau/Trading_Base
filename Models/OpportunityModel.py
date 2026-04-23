@@ -23,8 +23,9 @@ class OpportunityModel(TradingModelInterface):
             self.model = model
         else:
             self.model = RandomForestClassifier(
-                n_estimators=200,
-                max_depth=8,
+                n_estimators=100,
+                max_depth=5,
+                min_samples_leaf=15,
                 random_state=42,
                 n_jobs=-1,
                 class_weight='balanced'
@@ -44,18 +45,20 @@ class OpportunityModel(TradingModelInterface):
         Target = cast(Target_Opportunity, self.target_manager.get_target(TargetID.OPPORTUNITY))
 
         df = pd.DataFrame({
-            "volatility_compression": Indicator.volatility_compression,
-            "volatility_expansion": Indicator.volatility_expansion,
-            "volatility_change": Indicator.volatility_change,
-            "volume_spike": Indicator.volume_spike,
+            "bb_width": Indicator.bb_width_norm,
+            "vol_ratio": Indicator.volatility_ratio,
+            "vol_change": Indicator.volatility_change,
+            "volume_ratio": Indicator.volume_ratio,
             "volume_trend": Indicator.volume_trend,
-            "momentum_alignment": Indicator.momentum_alignment,
-            "near_support": Indicator.near_support,
-            "near_resistance": Indicator.near_resistance,
-            "close_to_sma": Indicator.close_to_sma,
-            "price_acceleration": Indicator.price_acceleration,
+            "momentum_align": Indicator.momentum_alignment,
+            "dist_lower": Indicator.dist_lower_bb,
+            "dist_upper": Indicator.dist_upper_bb,
+            "dist_sma": Indicator.dist_sma,
+            "price_accel": Indicator.price_accel,
             "target": Target.target
-        }).dropna()
+        })
+
+        df = df.replace([np.inf, -np.inf], np.nan).dropna().reset_index(drop=True)
 
         X = df.drop(columns="target").to_numpy()
         y = df["target"].to_numpy()
@@ -94,8 +97,9 @@ class OpportunityModel(TradingModelInterface):
             y_train, y_test = y[train_idx], y[test_idx]
 
             model = RandomForestClassifier(
-                n_estimators=200,
-                max_depth=8,
+                n_estimators=100,
+                max_depth=5,
+                min_samples_leaf=15,
                 random_state=42,
                 n_jobs=-1,
                 class_weight='balanced'
@@ -113,23 +117,18 @@ class OpportunityModel(TradingModelInterface):
         Indicator = cast(OpportunityFeatures, self.feature_manager.get_feature(FeatureID.OPPORTUNITY))
         
         feature_array = np.array([[
-            Indicator.volatility_compression.iloc[-1],
-            Indicator.volatility_expansion.iloc[-1],
+            Indicator.bb_width_norm.iloc[-1],
+            Indicator.volatility_ratio.iloc[-1],
             Indicator.volatility_change.iloc[-1],
-            Indicator.volume_spike.iloc[-1],
+            Indicator.volume_ratio.iloc[-1],
             Indicator.volume_trend.iloc[-1],
             Indicator.momentum_alignment.iloc[-1],
-            Indicator.near_support.iloc[-1],
-            Indicator.near_resistance.iloc[-1],
-            Indicator.close_to_sma.iloc[-1],
-            Indicator.price_acceleration.iloc[-1]
+            Indicator.dist_lower_bb.iloc[-1],
+            Indicator.dist_upper_bb.iloc[-1],
+            Indicator.dist_sma.iloc[-1],
+            Indicator.price_accel.iloc[-1]
         ]])
         
         prediction = self.model.predict(feature_array)[0]
         
-        # print(f"OpportunityModel prediction: {prediction} (1=opportunity, 0=no opportunity)")
-        
-        if prediction == 1:
-            return True
-        
-        return False 
+        return True if prediction == 1 else False

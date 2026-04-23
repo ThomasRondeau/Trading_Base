@@ -24,7 +24,7 @@ class CascadeStrategy(TradingStrategyInterface):
         self.IsRunning = False
         self.strategy_id = 1
         self.symbol = "AAPL"
-        self.min_amplitude_threshold = 0.5
+        self.min_amplitude_threshold = 0.05
 
         self.featureManager = FeatureManager()
         self.targetManager = TargetManager()

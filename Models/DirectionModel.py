@@ -24,8 +24,10 @@ class DirectionModel(TradingModelInterface):
         else:
             self.model = xgb.XGBClassifier(
                 n_estimators=100,
-                max_depth=6,
-                learning_rate=0.1,
+                max_depth=4,  # Reduced depth to prevent overfitting
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.8,
                 random_state=42,
                 n_jobs=-1,
                 eval_metric="logloss"
@@ -45,21 +47,20 @@ class DirectionModel(TradingModelInterface):
         Target = cast(Target_Direction, self.target_manager.get_target(TargetID.DIRECTION))
 
         df = pd.DataFrame({
-            "rsi_momentum": Indicator.rsi_momentum,
-            "macd_momentum": Indicator.macd_momentum,
-            "price_vs_sma": Indicator.price_vs_sma,
-            "sma_slope": Indicator.sma_slope,
-            "price_position": Indicator.price_position,
-            "upper_breakout": Indicator.upper_breakout,
-            "lower_breakout": Indicator.lower_breakout,
-            "bullish_confluence": Indicator.bullish_confluence,
-            "bearish_confluence": Indicator.bearish_confluence,
-            "volume_price_trend": Indicator.volume_price_trend,
+            "rsi": Indicator.rsi,
+            "macd_hist": Indicator.macd_hist_norm,
+            "dist_sma": Indicator.price_dist_sma,
+            "sma_slope": Indicator.sma_slope_norm,
+            "bb_pos": Indicator.bb_position,
+            "vol_trend": Indicator.volume_trend,
+            "volatility": Indicator.volatility,
+            "mom_5": Indicator.mom_5,
+            "mom_10": Indicator.mom_10,
+            "mom_20": Indicator.mom_20,
             "target": Target.target
         })
 
-
-        df = df.dropna().reset_index(drop=True)
+        df = df.replace([np.inf, -np.inf], np.nan).dropna().reset_index(drop=True)
 
         X = df.drop(columns="target").to_numpy()
         y = df["target"].to_numpy()
@@ -99,8 +100,10 @@ class DirectionModel(TradingModelInterface):
 
             model = xgb.XGBClassifier(
                 n_estimators=100,
-                max_depth=6,
-                learning_rate=0.1,
+                max_depth=4,
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.8,
                 random_state=42,
                 n_jobs=-1,
                 eval_metric="logloss"
@@ -118,16 +121,16 @@ class DirectionModel(TradingModelInterface):
         Indicator = cast(DirectionFeatures, self.feature_manager.get_feature(FeatureID.DIRECTION))
         
         feature_array = np.array([[
-            Indicator.rsi_momentum.iloc[-1],
-            Indicator.macd_momentum.iloc[-1],
-            Indicator.price_vs_sma.iloc[-1],
-            Indicator.sma_slope.iloc[-1],
-            Indicator.price_position.iloc[-1],
-            Indicator.upper_breakout.iloc[-1],
-            Indicator.lower_breakout.iloc[-1],
-            Indicator.bullish_confluence.iloc[-1],
-            Indicator.bearish_confluence.iloc[-1],
-            Indicator.volume_price_trend.iloc[-1]
+            Indicator.rsi.iloc[-1],
+            Indicator.macd_hist_norm.iloc[-1],
+            Indicator.price_dist_sma.iloc[-1],
+            Indicator.sma_slope_norm.iloc[-1],
+            Indicator.bb_position.iloc[-1],
+            Indicator.volume_trend.iloc[-1],
+            Indicator.volatility.iloc[-1],
+            Indicator.mom_5.iloc[-1],
+            Indicator.mom_10.iloc[-1],
+            Indicator.mom_20.iloc[-1]
         ]])
         
         prediction = self.model.predict(feature_array)[0]

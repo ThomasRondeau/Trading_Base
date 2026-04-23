@@ -9,7 +9,7 @@ class Target_Opportunity(TargetInterface):
         self.data = data
         self.target = None
         self.training_data_shift = 0
-        self.threshold = 0.015
+        self.threshold = 0.0005
 
     def calculate(self, resolved_dependencies: dict[TargetID, TargetInterface] = None) -> None:
         shifted = self.data['close'].iloc[5 : 5 - self.training_data_shift].reset_index(drop=True)

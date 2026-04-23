@@ -53,23 +53,87 @@ class BacktestEngine:
         if self.backtest_data is None or self.strategies is None or len(self.strategies) == 0:
             raise ValueError("Data and strategies must be set before running the backtest.")
         
-        print(f"BacktestEngine started with {', '.join(strategy.name for strategy in self.strategies)} strategies.")
+        print(f"BacktestEngine started with {', '.join(strategy.__class__.__name__ for strategy in self.strategies)} strategies.")
         self.IsRunning = True
 
         for strategy in self.strategies:
             strategy.update_status(True)
 
+        trades = []  # List to store completed trades: {'entry_price', 'exit_price', 'side', 'pnl'}
+        active_positions = []  # List of {'entry_price', 'side', 'quantity', 'bars_held'}
 
         for timestamp, bar in self.backtest_data.iterrows():
+            # 1. Update active positions (close after 5 bars)
+            remaining_positions = []
+            for pos in active_positions:
+                pos['bars_held'] += 1
+                if pos['bars_held'] >= 5:
+                    # Close position
+                    exit_price = bar['close']
+                    pnl = (exit_price - pos['entry_price']) if pos['side'] == 'BUY' else (pos['entry_price'] - exit_price)
+                    pnl_percent = (pnl / pos['entry_price']) * 100
+                    trades.append({
+                        'entry_price': pos['entry_price'],
+                        'exit_price': exit_price,
+                        'side': pos['side'],
+                        'pnl': pnl,
+                        'pnl_percent': pnl_percent
+                    })
+                else:
+                    remaining_positions.append(pos)
+            active_positions = remaining_positions
+
+            # 2. Get new orders from strategies
             orders = []
             for strategy in self.strategies:
                 orders.extend(strategy.on_bar(bar))
                 
             if orders:
-                print(f"Generated {len(orders)} orders at timestamp {timestamp}.")
-                print(orders)
-                #orders = self.OrderManager.aggregate_and_net(orders)
-                #self.OrderManager.process_orders(orders, self.Portfolio, self.OrderBook)
+                for order in orders:
+                    # Execute order immediately at current bar close
+                    active_positions.append({
+                        'entry_price': bar['close'],
+                        'side': order.side,
+                        'quantity': order.quantity,
+                        'bars_held': 0
+                    })
+
+        # Close any remaining positions at the last price
+        last_price = self.backtest_data.iloc[-1]['close']
+        for pos in active_positions:
+            pnl = (last_price - pos['entry_price']) if pos['side'] == 'BUY' else (pos['entry_price'] - last_price)
+            pnl_percent = (pnl / pos['entry_price']) * 100
+            trades.append({
+                'entry_price': pos['entry_price'],
+                'exit_price': last_price,
+                'side': pos['side'],
+                'pnl': pnl,
+                'pnl_percent': pnl_percent
+            })
+
+        # 3. Calculate and print performance summary
+        self.print_summary(trades)
+
+    def print_summary(self, trades):
+        if not trades:
+            print("\n--- Backtest Summary ---")
+            print("No trades executed.")
+            return
+
+        total_trades = len(trades)
+        winning_trades = [t for t in trades if t['pnl'] > 0]
+        win_rate = (len(winning_trades) / total_trades) * 100
+        total_pnl_percent = sum(t['pnl_percent'] for t in trades)
+        avg_pnl_percent = total_pnl_percent / total_trades
+        
+        print("\n" + "="*30)
+        print("   BACKTEST PERFORMANCE")
+        print("="*30)
+        print(f"Total Trades    : {total_trades}")
+        print(f"Win Rate        : {win_rate:.2f}%")
+        print(f"Total PnL (%)   : {total_pnl_percent:.2f}%")
+        print(f"Average PnL (%) : {avg_pnl_percent:.2f}%")
+        print("="*30 + "\n")
 
 
     def stop(self):

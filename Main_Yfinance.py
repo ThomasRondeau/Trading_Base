@@ -16,10 +16,10 @@ def main():
         dataManager = DataManager()
 
         print("Collecte des données d'entraînement...")
-        training_data = dataManager.collect_data_yfinance("AAPL", 50, 0)
+        training_data = dataManager.collect_data_yfinance("AAPL", 50, 5)
         
         print("Collecte des données de backtest...")
-        backtest_data = dataManager.collect_data_yfinance("AAPL", 1)
+        backtest_data = dataManager.collect_data_yfinance("AAPL", 5, 0)
 
         BacktestingEngine.set_training_data(training_data)
         BacktestingEngine.set_backtest_data(backtest_data)

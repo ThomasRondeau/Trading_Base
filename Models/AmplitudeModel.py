@@ -23,7 +23,8 @@ class AmplitudeModel(TradingModelInterface):
         else:
             self.model = RandomForestRegressor(
                 n_estimators=100,
-                max_depth=10,
+                max_depth=5,  # Reduced from 10
+                min_samples_leaf=10,
                 random_state=42,
                 n_jobs=-1
             )
@@ -42,18 +43,17 @@ class AmplitudeModel(TradingModelInterface):
         Target = cast(Target_Amplitude, self.target_manager.get_target(TargetID.AMPLITUDE))
 
         df = pd.DataFrame({
-            "volatility": Indicator.current_volatility,
-            "percentile": Indicator.volatility_percentile,
-            "distance_sma": Indicator.distance_to_sma,
-            "distance_bb": Indicator.distance_to_bb,
-            "rsi": Indicator.rsi_extreme,
-            "macd": Indicator.macd_intensity,
-            "momentum": Indicator.momentum_strength,
-            "volume": Indicator.volume_intensity,
+            "volatility": Indicator.volatility,
+            "dist_sma": Indicator.dist_sma,
+            "bb_width": Indicator.bb_width,
+            "rsi_extreme": Indicator.rsi_extreme,
+            "macd_hist_abs": Indicator.macd_hist_abs,
+            "momentum_5": Indicator.momentum_5,
+            "volume_ratio": Indicator.volume_ratio,
             "target": Target.target
         })
 
-        df = df.dropna().reset_index(drop=True)
+        df = df.replace([np.inf, -np.inf], np.nan).dropna().reset_index(drop=True)
         
         X = df.drop(columns="target").to_numpy()
         y = df["target"].to_numpy()
@@ -89,7 +89,8 @@ class AmplitudeModel(TradingModelInterface):
 
             model = RandomForestRegressor(
                 n_estimators=100,
-                max_depth=10,
+                max_depth=5,
+                min_samples_leaf=10,
                 random_state=42,
                 n_jobs=-1
             )
@@ -109,14 +110,13 @@ class AmplitudeModel(TradingModelInterface):
         Indicator = cast(AmplitudeFeatures, self.feature_manager.get_feature(FeatureID.AMPLITUDE))
         
         feature_array = np.array([[
-            Indicator.current_volatility.iloc[-1],
-            Indicator.volatility_percentile.iloc[-1],
-            Indicator.distance_to_sma.iloc[-1],
-            Indicator.distance_to_bb.iloc[-1],
+            Indicator.volatility.iloc[-1],
+            Indicator.dist_sma.iloc[-1],
+            Indicator.bb_width.iloc[-1],
             Indicator.rsi_extreme.iloc[-1],
-            Indicator.macd_intensity.iloc[-1],
-            Indicator.momentum_strength.iloc[-1],
-            Indicator.volume_intensity.iloc[-1]
+            Indicator.macd_hist_abs.iloc[-1],
+            Indicator.momentum_5.iloc[-1],
+            Indicator.volume_ratio.iloc[-1]
         ]])
         
         return float(self.model.predict(feature_array)[0])

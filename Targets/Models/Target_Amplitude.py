@@ -14,7 +14,7 @@ class Target_Amplitude(TargetInterface):
         shifted = self.data['close'].iloc[5 : 5 - self.training_data_shift].reset_index(drop=True)
         close = self.data['close'][:-self.training_data_shift].reset_index(drop=True)
 
-        self.target = ((shifted - close) / close).abs() * 100
+        self.target = ((shifted - close) / close) * 100
         
 
     def update(self, new_data: pd.DataFrame, training_data_shift : int) -> None:
