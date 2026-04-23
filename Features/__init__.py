@@ -10,6 +10,8 @@ from .Base.SMA import SMA
 from .Base.SUPPORT import Support
 from .Base.Vwap import Vwap
 from .Base.VOLUME import VOLUME
+from .Base.ZScore import ZScoreFeature
+from .Base.ADX import ADXFeature
 
 from .Models.AmplitudeFeatures import AmplitudeFeatures
 from .Models.OpportunityFeatures import OpportunityFeatures

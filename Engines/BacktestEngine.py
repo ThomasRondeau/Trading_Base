@@ -69,13 +69,18 @@ class BacktestEngine:
                 pos['bars_held'] += 1
                 if pos['bars_held'] >= 5:
                     # Close position
-                    exit_price = bar['close']
+                    symbol = pos.get('symbol', 'unknown')
+                    # Use symbol specific price if available, else default to 'close'
+                    price_col = f"close_{symbol}" if f"close_{symbol}" in bar else 'close'
+                    exit_price = bar[price_col]
+                    
                     pnl = (exit_price - pos['entry_price']) if pos['side'] == 'BUY' else (pos['entry_price'] - exit_price)
                     pnl_percent = (pnl / pos['entry_price']) * 100
                     trades.append({
                         'entry_price': pos['entry_price'],
                         'exit_price': exit_price,
                         'side': pos['side'],
+                        'symbol': symbol,
                         'pnl': pnl,
                         'pnl_percent': pnl_percent
                     })
@@ -91,22 +96,29 @@ class BacktestEngine:
             if orders:
                 for order in orders:
                     # Execute order immediately at current bar close
+                    price_col = f"close_{order.symbol}" if f"close_{order.symbol}" in bar else 'close'
                     active_positions.append({
-                        'entry_price': bar['close'],
+                        'symbol': order.symbol,
+                        'entry_price': bar[price_col],
                         'side': order.side,
                         'quantity': order.quantity,
                         'bars_held': 0
                     })
 
         # Close any remaining positions at the last price
-        last_price = self.backtest_data.iloc[-1]['close']
+        last_bar = self.backtest_data.iloc[-1]
         for pos in active_positions:
+            symbol = pos.get('symbol', 'unknown')
+            price_col = f"close_{symbol}" if f"close_{symbol}" in last_bar else 'close'
+            last_price = last_bar[price_col]
+            
             pnl = (last_price - pos['entry_price']) if pos['side'] == 'BUY' else (pos['entry_price'] - last_price)
             pnl_percent = (pnl / pos['entry_price']) * 100
             trades.append({
                 'entry_price': pos['entry_price'],
                 'exit_price': last_price,
                 'side': pos['side'],
+                'symbol': symbol,
                 'pnl': pnl,
                 'pnl_percent': pnl_percent
             })

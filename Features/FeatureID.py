@@ -26,3 +26,5 @@ class FeatureID(Enum):
     AMPLITUDE = auto()
     DIRECTION = auto()
     OPPORTUNITY = auto()
+    ZSCORE = auto()
+    ADX = auto()
