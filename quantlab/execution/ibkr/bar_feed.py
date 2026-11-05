@@ -22,7 +22,7 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.schema import OHLCV_COLUMNS
+from quantlab.data.pairs import combine_symbols
 from quantlab.execution.ibkr.client import IBKRClient, IBKRRequestError, stock
 
 logger = logging.getLogger(__name__)
@@ -105,13 +105,7 @@ class IBKRBarFeed:
             )
             for symbol in self.symbols
         }
-        if len(self.symbols) == 1:
-            data = frames[self.symbols[0]]
-        else:
-            data = pd.concat({s: f[list(OHLCV_COLUMNS)] for s, f in frames.items()}, axis=1, join="inner")
-            data.columns = [f"{column[1]}_{column[0]}" for column in data.columns]
-            for field in OHLCV_COLUMNS:
-                data[field] = data[f"{field}_{self.symbols[0]}"]
+        data = combine_symbols(frames)
         if not data.empty:
             # The newest historical bar may still be forming: drop it, the live feed will deliver it complete
             data = data.iloc[:-1]

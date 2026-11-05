@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
 
@@ -30,7 +31,7 @@ class BarBuffer:
     def is_full(self) -> bool:
         return self._size == self.capacity
 
-    def append(self, timestamp: pd.Timestamp, values: Sequence[float] | np.ndarray) -> None:
+    def append(self, timestamp: pd.Timestamp, values: Sequence[float] | npt.NDArray[np.float64]) -> None:
         ts = pd.Timestamp(timestamp)
         if self._size and ts.value <= self._times[(self._next - 1) % self.capacity]:
             raise ValueError(f"Bars must arrive in strictly increasing time order (got {ts}).")
@@ -41,7 +42,7 @@ class BarBuffer:
 
     def append_bar(self, bar: pd.Series) -> None:
         """Append a bar Series named by its timestamp (as yielded by `DataFrame.iterrows`)."""
-        self.append(bar.name, bar[list(self.columns)].to_numpy(dtype=float))
+        self.append(pd.Timestamp(bar.name), bar[list(self.columns)].to_numpy(dtype=float))  # type: ignore[arg-type]
 
     def extend(self, bars: pd.DataFrame) -> None:
         """Append many bars; only the last `capacity` are kept."""
@@ -50,7 +51,7 @@ class BarBuffer:
         ):
             self.append(timestamp, row)
 
-    def _order(self) -> np.ndarray:
+    def _order(self) -> npt.NDArray[np.int64]:
         start = (self._next - self._size) % self.capacity
         return (start + np.arange(self._size)) % self.capacity
 
@@ -70,4 +71,4 @@ class BarBuffer:
     def last_timestamp(self) -> pd.Timestamp | None:
         if not self._size:
             return None
-        return self.frame(last=1).index[-1]
+        return pd.Timestamp(self.frame(last=1).index[-1])

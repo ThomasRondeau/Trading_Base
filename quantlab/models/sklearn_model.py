@@ -4,13 +4,15 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 from sklearn.base import clone
 from sklearn.model_selection import TimeSeriesSplit
 
 from quantlab.targets import ForwardTarget
 
-Score = Callable[[np.ndarray, np.ndarray], float]
+Array = npt.NDArray[Any]
+Score = Callable[[Array, Array], float]
 
 
 def build_dataset(
@@ -19,7 +21,7 @@ def build_dataset(
     columns: Sequence[str],
     target: ForwardTarget,
     drop_last: int = 0,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[Array, Array]:
     """
     Supervised dataset: rows of `features[columns]` paired with `target` computed on `data`.
 
@@ -60,7 +62,7 @@ class SklearnModel:
         self.target = target
         self.score = score
 
-    def dataset(self, data: pd.DataFrame, features: pd.DataFrame, drop_last: int) -> tuple[np.ndarray, np.ndarray]:
+    def dataset(self, data: pd.DataFrame, features: pd.DataFrame, drop_last: int) -> tuple[Array, Array]:
         return build_dataset(data, features, self.features, self.target, drop_last=drop_last)
 
     def _set_n_jobs(self, estimator: Any, n_jobs: Any) -> Any:
@@ -68,7 +70,7 @@ class SklearnModel:
             estimator.set_params(n_jobs=n_jobs)
         return estimator
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> None:
+    def fit(self, X: Array, y: Array) -> None:
         self._set_n_jobs(self.estimator, self._fit_n_jobs).fit(X, y)
         self._set_n_jobs(self.estimator, 1)
 
@@ -77,11 +79,11 @@ class SklearnModel:
         x = np.array([[row[c] for c in self.features]], dtype=float)
         return self.estimator.predict(x)[0]
 
-    def in_sample_score(self, X: np.ndarray, y: np.ndarray) -> float:
+    def in_sample_score(self, X: Array, y: Array) -> float:
         """Score on the training data itself: optimistic, for overfitting diagnosis only."""
         return float(self.score(y, self.estimator.predict(X)))
 
-    def cross_validate(self, X: np.ndarray, y: np.ndarray, n_splits: int = 5) -> tuple[float, list[float]]:
+    def cross_validate(self, X: Array, y: Array, n_splits: int = 5) -> tuple[float, list[float]]:
         """Time-ordered CV (TimeSeriesSplit) of clones of the configured estimator."""
         scores: list[float] = []
         for train_idx, test_idx in TimeSeriesSplit(n_splits=n_splits).split(X):

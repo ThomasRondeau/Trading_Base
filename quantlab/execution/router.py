@@ -186,7 +186,7 @@ class OrderRouter:
         tracked = self._orders.get(order_id)
         if tracked is None:
             return
-        logger.info("Order %s %s %s", order_id, status.value, message)
+        logger.debug("Order %s %s %s", order_id, status.value, message)
         lot = self.lots.get(tracked.lot_id)
         if lot is None:
             return

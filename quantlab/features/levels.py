@@ -11,10 +11,11 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
 
-def _local_extrema(values: np.ndarray, window: int, kind: str) -> list[tuple[int, float]]:
+def _local_extrema(values: npt.NDArray[np.float64], window: int, kind: str) -> list[tuple[int, float]]:
     pick = min if kind == "min" else max
     return [
         (i, values[i])

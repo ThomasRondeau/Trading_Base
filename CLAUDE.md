@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ML trading-strategy research tool: technical-indicator features → ML/statistical models → strategies → bar-by-bar backtest, with IBKR (TWS / IB Gateway) for data and, as a first-class goal, **paper/live trading**. The same strategy, feature and risk code must work in both backtest and live mode; don't introduce backtest-only shortcuts. All code, docstrings and logs are in English and use `logging` (no `print` in the library). Strategy write-ups live in `docs/`.
 
-A staged refactor is in progress (bug list, target architecture, steps 0–6): `~/.claude/plans/parallel-watching-crown.md`. Steps 0–5 are done: safety-net tests, bug fixes, `quantlab/` package, live-ready core (stateless features, bar buffer, parity tests), shared execution layer (runner, router, simulated and IBKR brokers), journaled live sessions with restart and replay. Step 6 (CLI, mypy clean, pre-commit) remains.
+A staged refactor was carried out (bug list, target architecture, steps 0–6): `~/.claude/plans/parallel-watching-crown.md`. All steps (0–6) are done: safety-net tests, bug fixes, `quantlab/` package, live-ready core (stateless features, bar buffer, parity tests), shared execution layer (runner, router, simulated and IBKR brokers), journaled live sessions with restart and replay, CLI, mypy strict clean, pre-commit.
 
 **IBKR safety:** never send orders to TWS. Order calls are refused unless `IBKR_READ_ONLY=false` (default true; enforced in both `IBKRClient` and `GuardedEClient`), and on a real-money account (not `DU…`) unless `IBKR_ALLOW_LIVE=true`; keep both. Settings: `IBKR_HOST` / `IBKR_PORT` / `IBKR_CLIENT_ID` (`quantlab/config.py`). The user's TWS API listens on 7496 and is logged into a **real-money** account with a read-only API: only data requests, with a dedicated client id. Its API has no real-time market data subscription (error 10089): historical bars work, `reqRealTimeBars` does not. Test IBKR code with the fake `EClient` in `tests/test_ibkr.py`, never against TWS.
 
@@ -16,16 +16,17 @@ Python 3.10 (on this machine `python` is 3.8 — use `py -3.10`). Dependencies a
 
 - Tests: `py -3.10 -m pytest` (single test: `py -3.10 -m pytest tests/test_walk_forward.py::test_expand_grid`; skip the ~80 s end-to-end backtests with `-m "not slow"`).
 - Characterization baseline: `tests/test_characterization.py` backtests every strategy on frozen parquet fixtures (`tests/fixtures/`) and compares all metrics to `baseline_metrics.json`. A pure refactor must keep it green. Only regenerate (`UPDATE_BASELINE=1 py -3.10 -m pytest tests/test_characterization.py`) when a change is meant to alter results, and review the JSON diff.
-- Lint/format/types: `py -3.10 -m ruff check .`, `py -3.10 -m ruff format .`, `py -3.10 -m mypy quantlab` (strict; not clean yet).
+- Lint/format/types: `py -3.10 -m ruff check .`, `py -3.10 -m ruff format .`, `py -3.10 -m mypy quantlab` (strict; must stay clean).
 - Secrets: `MASSIVE_API_KEY` from the environment or `.env` (template `.env.example`; `.env` is gitignored).
 
-Entry scripts (thin wrappers, to be replaced by a CLI in step 6):
+Command line (`quantlab/cli.py`; `py -3.10 -m quantlab --help`, or `quantlab` after `pip install -e .`):
 
-- `Main_Yfinance.py` (cascade), `Main_<Arima|Hybrid|MeanReversion|Trend|PairTrading>.py` — single-strategy backtests on yfinance 2-minute bars (yfinance serves ~60 days of intraday data).
-- `Main_AllStrategies.py` — every strategy on ~6 months of 1-minute Massive data, then as a portfolio.
-- `Main_WalkForward.py` — walk-forward hyperparameter search example.
-- `Main_IBKR.py` (backtest on IBKR history), `UI_App.py` (chart) — need TWS/IB Gateway with the API enabled.
-- `Main_Paper.py --strategy trend --symbol AAPL --session NAME [--resume] [--live]` — journaled session on live IBKR bars in `sessions/NAME/`: shadow mode (simulated fills, no orders) while read-only, paper trading through `IBKRBroker` otherwise; a real-money account needs `--live` plus typing the account id. `Main_Replay.py --session NAME` replays it in the backtester.
+- `backtest --strategy NAME [--strategy ...] [--each] --symbol S [--symbol S2] --source yfinance|massive|ibkr|file [--file F] --days N --test-days D|--test-fraction F [--param k=v|name.k=v] [--trades CSV] [--equity CSV]` — strategies by name from `strategies/registry.py` (`trend`, `mean_reversion`, `arima`, `ml_hybrid`, `cascade`, `pair` with two symbols). yfinance serves ~60 days of 2-minute bars.
+- `optimize --strategy NAME --grid k=v1,v2 ... --train-size --validation-size --test-size [--embargo]` — walk-forward search.
+- `paper --strategy NAME --symbol S --session NAME [--resume] [--live]` — journaled session on live IBKR bars in `sessions/NAME/`: shadow mode (simulated fills, no orders) while read-only, paper trading through `IBKRBroker` otherwise; a real-money account needs `--live` plus typing the account id. Conservative risk defaults (10 shares/order, 50/position, 1 % daily-loss kill switch).
+- `replay --session NAME` — replays a session in the backtester; `plot --symbol S --source ...` — VWAP + support/resistance chart of one session.
+
+Pre-commit (`.pre-commit-config.yaml`: ruff check/format, mypy strict on `quantlab/`): `py -3.10 -m pre_commit install`; on this machine set `VIRTUALENV_OVERRIDE_APP_DATA=C:/Users/Thomas/.cache/virtualenv` first (Windows Store Python long-path issue).
 
 ## Architecture (`quantlab/`)
 

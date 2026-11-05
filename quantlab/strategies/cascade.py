@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from typing import Any
 
-import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import xgboost as xgb
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
@@ -72,7 +73,7 @@ class CascadeStrategy(Strategy):
             ForwardTarget(HORIZON, "move", threshold_pct=0.05),
             balanced_accuracy_score,
         )
-        self._datasets: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        self._datasets: dict[str, tuple[npt.NDArray[Any], npt.NDArray[Any]]] = {}
 
     @property
     def models(self) -> dict[str, SklearnModel]:

@@ -22,8 +22,11 @@ dependencies = [
     "pyarrow>=17",
 ]
 
+[project.scripts]
+quantlab = "quantlab.cli:main"
+
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "pandas-stubs"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "pandas-stubs", "types-requests", "pre-commit>=3"]
 
 [tool.setuptools.packages.find]
 include = ["quantlab*"]

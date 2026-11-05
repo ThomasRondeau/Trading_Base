@@ -19,7 +19,7 @@ from quantlab.features.technical import ATR, MACD, RSI, SMA, BollingerBands, Vol
 class _FeatureSet(Feature):
     prefix: str
     columns: tuple[str, ...]
-    required_columns = ("close",)
+    required_columns: tuple[str, ...] = ("close",)
 
     @property
     def name(self) -> str:

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from typing import Any
 
-import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import xgboost as xgb
 from sklearn.metrics import accuracy_score
@@ -44,7 +45,7 @@ class MLHybridStrategy(Strategy):
             ForwardTarget(5, "direction"),
             accuracy_score,
         )
-        self._dataset: tuple[np.ndarray, np.ndarray] | None = None
+        self._dataset: tuple[npt.NDArray[Any], npt.NDArray[Any]] | None = None
 
     def features(self) -> Sequence[Feature]:
         return (self.direction_features,)

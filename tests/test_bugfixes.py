@@ -132,7 +132,7 @@ def test_massive_fetch_data_dates_and_utc_index(monkeypatch: pytest.MonkeyPatch)
             t0 = int(pd.Timestamp("2026-01-05 14:30", tz="UTC").timestamp() * 1000)
             return {"results": [{"o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 10, "t": t0 + 60_000 * i} for i in range(3)]}
 
-    def fake_get(url: str, params: dict[str, Any]) -> FakeResponse:
+    def fake_get(url: str, params: dict[str, Any], timeout: float) -> FakeResponse:
         seen["url"] = url
         return FakeResponse()
 
@@ -144,6 +144,19 @@ def test_massive_fetch_data_dates_and_utc_index(monkeypatch: pytest.MonkeyPatch)
     assert seen["url"].endswith(expected)
     assert str(df.index.tz) == "UTC"
     assert df.index[0] == pd.Timestamp("2026-01-05 14:30", tz="UTC")
+
+
+def test_massive_errors_never_log_the_api_key(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import requests
+
+    def failing_get(url: str, params: dict[str, Any], timeout: float) -> Any:
+        raise requests.exceptions.ConnectionError(f"cannot reach {url}?apiKey={params['apiKey']}")
+
+    monkeypatch.setattr(massive_module.requests, "get", failing_get)
+    assert MassiveAPIClient(api_key="SECRET-KEY").fetch_data("AAPL", days_back=2, until=0).empty
+    assert caplog.records and "SECRET-KEY" not in caplog.text
 
 
 # --- A1: MACD windows --------------------------------------------------------------------------------------

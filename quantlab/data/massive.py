@@ -61,11 +61,13 @@ class MassiveAPIClient:
 
         logger.info("Downloading %s from Massive API: %s to %s", symbol, from_date_str, to_date_str)
         try:
-            response = requests.get(url, params=params)
+            response = requests.get(url, params=params, timeout=60)
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            details = e.response.text if getattr(e, "response", None) is not None else ""
-            logger.error("Massive API request failed: %s %s", e, details)
+            # Never log the exception itself: its message contains the URL, hence the API key.
+            status = e.response.status_code if e.response is not None else None
+            details = e.response.text[:200] if e.response is not None else ""
+            logger.error("Massive API request failed (%s, HTTP %s) %s", type(e).__name__, status, details)
             return pd.DataFrame()
 
         data = response.json()

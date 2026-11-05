@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+import numpy.typing as npt
 from statsmodels.tsa.arima.model import ARIMA
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ class ArimaForecaster:
         self.order = order
         self.window = window
 
-    def forecast_change(self, closes: np.ndarray) -> float:
+    def forecast_change(self, closes: npt.NDArray[np.float64]) -> float:
         """Predicted change of the next close (0.0 when there is not enough data or the fit fails)."""
         series = np.asarray(closes, dtype=float)
         if len(series) < self.window:

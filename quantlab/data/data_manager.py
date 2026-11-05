@@ -49,7 +49,7 @@ class DataManager:
 
         cached_data = self._load_cache(symbol)
         # Cache hits are checked per calendar date
-        cached_dates = set(cached_data.index.date.tolist()) if not cached_data.empty else set()
+        cached_dates = set(pd.DatetimeIndex(cached_data.index).date.tolist()) if not cached_data.empty else set()
 
         contract = stock(symbol)
         all_data = [cached_data] if not cached_data.empty else []
@@ -89,9 +89,8 @@ class DataManager:
         # Keep the requested window only
         min_date = (datetime.now() - timedelta(days=days_back)).date()
         max_date = (datetime.now() - timedelta(days=until)).date()
-        consolidated_data = consolidated_data[
-            (consolidated_data.index.date >= min_date) & (consolidated_data.index.date <= max_date)
-        ]
+        dates = pd.DatetimeIndex(consolidated_data.index).date
+        consolidated_data = consolidated_data.loc[(dates >= min_date) & (dates <= max_date)]
 
         logger.info("Consolidated data: %d bars over %d days", len(consolidated_data), days_back - until)
         return consolidated_data
