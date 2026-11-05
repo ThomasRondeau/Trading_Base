@@ -5,6 +5,8 @@ from typing import Optional
 import pandas as pd
 import requests
 
+from Connections.schema import validate_ohlcv
+
 try:
     from dotenv import load_dotenv
 
@@ -41,10 +43,10 @@ class MassiveAPIClient:
         :param symbol: Symbole (ex: 'AAPL')
         :param days_back: Nombre de jours en arrière pour le début
         :param until: Nombre de jours en arrière pour la fin (0 = aujourd'hui)
-        :return: DataFrame avec les colonnes open, high, low, close, volume et index Datetime.
+        :return: DataFrame OHLCV au format validate_ohlcv (index Datetime UTC).
         """
+        start_date = datetime.now() - timedelta(days=days_back)
         end_date = datetime.now() - timedelta(days=until)
-        start_date = end_date - timedelta(days=days_back)
         
         from_date_str = start_date.strftime("%Y-%m-%d")
         to_date_str = end_date.strftime("%Y-%m-%d")
@@ -92,15 +94,11 @@ class MassiveAPIClient:
         rename_dict = {k: v for k, v in column_mapping.items() if k in df.columns}
         df.rename(columns=rename_dict, inplace=True)
         
-        # Conversion du timestamp (millisecondes) en Datetime
-        if 'timestamp' in df.columns:
-            df['Datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df.set_index('Datetime', inplace=True)
-        
-        # Garder uniquement les colonnes requises si elles existent
-        expected_cols = ['open', 'high', 'low', 'close', 'volume']
-        available_cols = [col for col in expected_cols if col in df.columns]
-        df = df[available_cols]
-        
+        # Timestamps Massive = millisecondes epoch UTC
+        if 'timestamp' not in df.columns:
+            raise ValueError(f"Réponse Massive inattendue : colonnes {list(df.columns)}")
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+        df = validate_ohlcv(df[['timestamp', 'open', 'high', 'low', 'close', 'volume']], datetime_column='timestamp')
+
         print(f"Massive API : {len(df)} points (barres 1-minute) récupérés.")
         return df

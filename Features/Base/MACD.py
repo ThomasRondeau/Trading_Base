@@ -11,6 +11,8 @@ class MACD(FeatureInterface):
         :param long_window: Période pour la moyenne mobile longue.
         :param signal_window: Période pour la ligne de signal.
         """
+        if short_window >= long_window:
+            raise ValueError(f"MACD: short_window ({short_window}) must be < long_window ({long_window}).")
         self.data = data
         self.short_window = short_window
         self.long_window = long_window

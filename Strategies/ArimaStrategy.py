@@ -11,7 +11,12 @@ class ArimaStrategy(TradingStrategyInterface):
     """
     Stratégie basée sur les prédictions ARIMA.
     """
-    def __init__(self, order=(5,1,1)) -> None:
+    def __init__(self, order=(2, 1, 0), min_edge_bps: float = 2.0) -> None:
+        """
+        :param order: ordre (p, d, q) de l'ARIMA.
+        :param min_edge_bps: variation prédite minimale (en points de base du prix) pour trader ;
+                             par défaut les frais aller-retour (2 x 1 bp).
+        """
         super().__init__()
         self.strategy_id = 2
         self.symbol = "AAPL"
@@ -19,6 +24,7 @@ class ArimaStrategy(TradingStrategyInterface):
         self.featureManager = FeatureManager()
         self.targetManager = TargetManager()
         self.model = ArimaModel(order=order)
+        self.min_edge_bps = min_edge_bps
         self.current_data = pd.DataFrame()
 
     def train(self, training_data: pd.DataFrame) -> None:
@@ -41,7 +47,8 @@ class ArimaStrategy(TradingStrategyInterface):
         # Prédiction du prochain mouvement
         prediction = self.model.predict()
         
-        if prediction == 0:
+        edge_bps = abs(prediction) / float(bar['close']) * 1e4
+        if edge_bps < self.min_edge_bps:
             return []
 
         side = 'BUY' if prediction > 0 else 'SELL'

@@ -21,8 +21,8 @@ class TrendFollowingStrategy(TradingStrategyInterface):
         self.sma_slow = sma_slow
 
     def train(self, training_data: pd.DataFrame) -> None:
-        self.featureManager.register_indicator(FeatureID.SMA_5, SMA(window=self.sma_fast))
-        self.featureManager.register_indicator(FeatureID.SMA_20, SMA(window=self.sma_slow))
+        self.featureManager.register_indicator(FeatureID.SMA_FAST, SMA(window=self.sma_fast))
+        self.featureManager.register_indicator(FeatureID.SMA_SLOW, SMA(window=self.sma_slow))
         self.featureManager.register_indicator(FeatureID.ATR, ATR(window=14))
         self.current_data = training_data.copy()
         self.featureManager.update(self.current_data)
@@ -37,18 +37,18 @@ class TrendFollowingStrategy(TradingStrategyInterface):
         self.current_data = pd.concat([self.current_data, bar.to_frame().T]).iloc[-100:]
         self.featureManager.update(self.current_data)
         
-        sma5 = self.featureManager.get_feature(FeatureID.SMA_5).sma
-        sma20 = self.featureManager.get_feature(FeatureID.SMA_20).sma
+        sma_fast_values = self.featureManager.get_feature(FeatureID.SMA_FAST).sma
+        sma_slow_values = self.featureManager.get_feature(FeatureID.SMA_SLOW).sma
         
-        if len(sma5) < 5:
+        if len(sma_fast_values) < 5:
             return []
             
         # Crossover
-        was_below = sma5.iloc[-2] <= sma20.iloc[-2]
-        is_above = sma5.iloc[-1] > sma20.iloc[-1]
+        was_below = sma_fast_values.iloc[-2] <= sma_slow_values.iloc[-2]
+        is_above = sma_fast_values.iloc[-1] > sma_slow_values.iloc[-1]
         
-        was_above = sma5.iloc[-2] >= sma20.iloc[-2]
-        is_below = sma5.iloc[-1] < sma20.iloc[-1]
+        was_above = sma_fast_values.iloc[-2] >= sma_slow_values.iloc[-2]
+        is_below = sma_fast_values.iloc[-1] < sma_slow_values.iloc[-1]
         
         if was_below and is_above:
             return [Order(strategy_ID=self.strategy_id, symbol=self.symbol, side='BUY', quantity=10)]

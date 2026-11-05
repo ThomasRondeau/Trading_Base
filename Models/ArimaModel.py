@@ -1,3 +1,5 @@
+import logging
+
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.arima.model import ARIMA
@@ -7,14 +9,18 @@ from Targets.TargetManager import TargetManager
 from typing import Set
 from Features.FeatureID import FeatureID
 
+logger = logging.getLogger(__name__)
+
+
 class ArimaModel(TradingModelInterface):
     """
     Modèle statistique ARIMA pour prédire le prochain retour de prix.
     """
-    def __init__(self, order=(5,1,0)):
+    def __init__(self, order=(2, 1, 0), window: int = 50):
         self.feature_manager = None
         self.target_manager = None
         self.order = order
+        self.window = window
         self.model_fit = None
         self.history = None
 
@@ -49,14 +55,12 @@ class ArimaModel(TradingModelInterface):
         Prédit le prochain prix et retourne la direction attendue.
         """
         series = self.feature_manager.data['close'].values.astype(float)
-        try:
-            # On prend les 50 derniers points pour la rapidité
-            model = ARIMA(series[-50:], order=(2,1,0))
-            model_fit = model.fit()
-            output = model_fit.forecast()
-            yhat = output[0]
-            current_price = series[-1]
-            return float(yhat - current_price) # Retourne l'amplitude prédite
-        except Exception as e:
-            # print(f"ARIMA Error: {e}")
+        if len(series) < self.window:
             return 0.0
+        try:
+            model_fit = ARIMA(series[-self.window:], order=self.order).fit()
+        except (ValueError, np.linalg.LinAlgError) as e:
+            logger.warning("ARIMA%s fit failed: %s", self.order, e)
+            return 0.0
+        yhat = float(model_fit.forecast()[0])
+        return yhat - float(series[-1])  # Variation de prix prédite

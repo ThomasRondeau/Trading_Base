@@ -8,11 +8,12 @@ import warnings
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 from Connections.TradingApp import TradingApp
+from Connections.schema import validate_ohlcv
 from Features import *
 
 
 def main():
-    app = TradingApp()
+    app = TradingApp.get_instance()
     
     print("Tentative de connexion à TWS/IB Gateway...")
     print("Assurez-vous que TWS ou IB Gateway est lancé et configuré pour accepter les connexions API")
@@ -46,9 +47,13 @@ def main():
     
     spy = TradingApp.get_contract("SPY")
     data = app.get_historical_data(99, spy, end_date="20250711 20:00:00 US/Eastern")
+    data = validate_ohlcv(data)
     Indicator_Vwap = Vwap(data)
     Indicator_Support = Support(data)
     Indicator_Resistance = Resistance(data)
+    if not data.empty:
+        for indicator in (Indicator_Vwap, Indicator_Support, Indicator_Resistance):
+            indicator.calculate()
 
     try:
 

@@ -1,8 +1,13 @@
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
+from Connections.MassiveAPI import MassiveAPIClient
+from Connections.schema import validate_ohlcv
 from Connections.TradingApp import TradingApp
 import yfinance as yf
+
+# Index tickers use a different naming on Massive.
+MASSIVE_TICKER_ALIASES = {"^GSPC": "I:SPX", "SPX": "I:SPX", "^FTSE": "I:FTSE", "FTSE": "I:FTSE"}
 
 class DataManager:
     def __init__(self):
@@ -14,9 +19,7 @@ class DataManager:
     def _load_cache(self, symbol: str) -> pd.DataFrame:
         cache_path = self._get_cache_path(symbol)
         if cache_path.exists():
-            df = pd.read_csv(cache_path, parse_dates=['Datetime'])
-            df.set_index('Datetime', inplace=True)
-            return df
+            return validate_ohlcv(pd.read_csv(cache_path), datetime_column="Datetime")
         return pd.DataFrame()
 
     def _save_cache(self, symbol: str, data: pd.DataFrame):
@@ -61,9 +64,7 @@ class DataManager:
         if not all_data:
             raise ValueError("Aucune donnée n'a pu être récupérée")
 
-        consolidated_data = pd.concat(all_data)
-        consolidated_data = consolidated_data[~consolidated_data.index.duplicated(keep='first')]
-        consolidated_data = consolidated_data.sort_index()
+        consolidated_data = validate_ohlcv(pd.concat([validate_ohlcv(d) for d in all_data]))
 
         if new_data_fetched:
             self._save_cache(symbol, consolidated_data)
@@ -81,57 +82,27 @@ class DataManager:
         return consolidated_data
 
     def collect_data_yfinance(self, symbol: str, days_back: int, until: int = 0) -> pd.DataFrame:
-        print(f"Collecte des données via yfinance pour {symbol} sur {days_back} jours...")
+        """2-minute bars from `days_back` days ago to `until` days ago (yfinance serves ~60 days of intraday)."""
+        print(f"Collecte des données via yfinance pour {symbol} de J-{days_back} à J-{until}...")
+        start_date = datetime.now() - timedelta(days=days_back)
         end_date = datetime.now() - timedelta(days=until)
-        start_date = end_date - timedelta(days=days_back)
-        df = yf.download(symbol, start=start_date.strftime("%Y-%m-%d"), end=end_date.strftime("%Y-%m-%d"), interval='2m')
-        
-        # Supprimer le niveau "Ticker" du MultiIndex retourné par les nouvelles versions de yfinance
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.droplevel(1)
-            
-        df.reset_index(inplace=True)
-        
-        # Renommer les colonnes en minuscules pour correspondre aux attentes des indicateurs (SMA, MACD...)
-        df.rename(columns={
-            'Open': 'open',
-            'High': 'high',
-            'Low': 'low',
-            'Close': 'close',
-            'Volume': 'volume'
-        }, inplace=True)
-        
+        df = yf.download(
+            symbol,
+            start=start_date.strftime("%Y-%m-%d"),
+            end=end_date.strftime("%Y-%m-%d"),
+            interval="2m",
+            auto_adjust=False,
+            progress=False,
+        )
+        df = validate_ohlcv(df)
         print(f"Données yfinance récupérées: {len(df)} points")
         return df
 
     def collect_data_massive(self, symbol: str, days_back: int, until: int = 0) -> pd.DataFrame:
-        """
-        Collecte des données via Massive API.
-        Gère les tickers d'indices si nécessaire.
-        """
-        print(f"Collecte des données via Massive pour {symbol} sur {days_back} jours...")
-        
-        # Mapping symboles si besoin (ex: SPY -> SPY, ^GSPC -> I:SPX)
-        ticker = symbol
-        if symbol == "^GSPC" or symbol == "SPX":
-            ticker = "I:SPX"
-        elif symbol == "^FTSE" or symbol == "FTSE":
-            ticker = "I:FTSE"
-
-        df = self.massive_connector.get_intraday_data(ticker, days_back)
-        
+        """1-minute bars from Massive API, from `days_back` days ago to `until` days ago."""
+        ticker = MASSIVE_TICKER_ALIASES.get(symbol, symbol)
+        print(f"Collecte des données via Massive pour {ticker} de J-{days_back} à J-{until}...")
+        df = MassiveAPIClient().fetch_data(ticker, days_back=days_back, until=until)
         if df.empty:
             print(f"Attention: Aucune donnée récupérée via Massive pour {ticker}")
-            return pd.DataFrame()
-
-        # Filtrage 'until' (on retire les derniers jours si until > 0)
-        if until > 0:
-            limit_date = datetime.now() - timedelta(days=until)
-            df = df[df.index < limit_date]
-
-        print(f"Données Massive récupérées pour {ticker}: {len(df)} points")
-        
-        # Mise à jour du cache local
-        self._save_cache(symbol, df)
-        
         return df

@@ -17,19 +17,18 @@ class ADXFeature(FeatureInterface):
         low = self.data['low']
         close = self.data['close']
         
-        tr = np.maximum(high - low, 
-                        np.maximum(abs(high - close.shift(1)), 
-                                   abs(low - close.shift(1))))
+        prev_close = close.shift(1)
+        tr = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
         
         up_move = high - high.shift(1)
         down_move = low.shift(1) - low
         
-        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
-        
-        tr_smooth = pd.Series(tr).rolling(window=self.window).sum()
-        plus_dm_smooth = pd.Series(plus_dm).rolling(window=self.window).sum()
-        minus_dm_smooth = pd.Series(minus_dm).rolling(window=self.window).sum()
+        plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+        minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+
+        tr_smooth = tr.rolling(window=self.window).sum()
+        plus_dm_smooth = plus_dm.rolling(window=self.window).sum()
+        minus_dm_smooth = minus_dm.rolling(window=self.window).sum()
         
         plus_di = 100 * (plus_dm_smooth / tr_smooth)
         minus_di = 100 * (minus_dm_smooth / tr_smooth)

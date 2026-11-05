@@ -12,6 +12,8 @@ class FeatureID(Enum):
     SMA_5 = auto()
     SMA_10 = auto()
     SMA_20 = auto()
+    SMA_FAST = auto()  # fenêtre paramétrable (TrendFollowing)
+    SMA_SLOW = auto()  # fenêtre paramétrable (TrendFollowing)
     RSI = auto()
     MACD = auto()
     

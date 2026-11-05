@@ -4,6 +4,13 @@ from datetime import datetime, timedelta
 from Features import *
 
 class Resistance(FeatureInterface):
+    """
+    Resistance lines drawn between local extrema.
+
+    WARNING: NOT CAUSAL. Extrema are detected with a centered window (they use `window` future bars)
+    and the scan is O(n^3). Use for charting only, never as a model feature or a live trading signal.
+    """
+
     def __init__(self, data: pd.DataFrame = pd.DataFrame(), window: int = 10, min_len_resistance : int = 50):
         """
         Initialise le détecteur de résistances avec les données fournies.

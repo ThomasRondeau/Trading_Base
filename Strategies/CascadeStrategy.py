@@ -18,7 +18,8 @@ class CascadeStrategy(TradingStrategyInterface):
         """
         Initialise la stratégie avec les modèles nécessaires.
 
-        :param models: Dictionnaire contenant les modèles de trading.
+        :param min_amplitude_threshold: amplitude prédite minimale pour trader, en % (même unité que
+                                        Target_Amplitude et Target_Opportunity.threshold_pct).
         """
         super().__init__()
         self.IsRunning = False
@@ -51,7 +52,7 @@ class CascadeStrategy(TradingStrategyInterface):
         self.featureManager.register_indicator(FeatureID.SMA_10, SMA(window=10))
         self.featureManager.register_indicator(FeatureID.SMA_20, SMA(window=20))
         self.featureManager.register_indicator(FeatureID.RSI, RSI(window=14))
-        self.featureManager.register_indicator(FeatureID.MACD, MACD(long_window=12, short_window=26, signal_window=9))
+        self.featureManager.register_indicator(FeatureID.MACD, MACD(short_window=12, long_window=26, signal_window=9))
         self.featureManager.register_indicator(FeatureID.BOLLINGER_BANDS, BollingerBands(window=20, num_std_dev=2))
         self.featureManager.register_indicator(FeatureID.ATR, ATR(window=14))
         self.featureManager.register_indicator(FeatureID.VOLUME, VOLUME(window=14))

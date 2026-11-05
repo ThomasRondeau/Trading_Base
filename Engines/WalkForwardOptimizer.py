@@ -22,8 +22,9 @@ import io
 import itertools
 import logging
 import math
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 import pandas as pd
 
@@ -96,7 +97,7 @@ def expand_grid(param_grid: Mapping[str, Sequence[Any]]) -> list[Params]:
     for name in names:
         if len(param_grid[name]) == 0:
             raise ValueError(f"La grille du paramètre '{name}' est vide.")
-    return [dict(zip(names, values)) for values in itertools.product(*(param_grid[n] for n in names))]
+    return [dict(zip(names, values, strict=True)) for values in itertools.product(*(param_grid[n] for n in names))]
 
 
 def make_folds(

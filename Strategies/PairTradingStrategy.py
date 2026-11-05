@@ -20,6 +20,10 @@ class PairTradingStrategy(TradingStrategyInterface):
         self.featureManager = FeatureManager()
         self.current_data = pd.DataFrame()
         self.zscore_threshold = zscore_threshold # Plus sélectif
+        self.zscore_window = 30
+        self.smoothing_window = 3
+        # Historique conservé : assez pour le z-score lissé, sans croissance illimitée.
+        self.max_history = 4 * (self.zscore_window + self.smoothing_window)
 
     def train(self, training_data: pd.DataFrame) -> None:
         # training_data est supposé contenir 'close_AAPL' et 'close_MSFT'
@@ -27,7 +31,7 @@ class PairTradingStrategy(TradingStrategyInterface):
         if 'ratio' not in self.current_data.columns:
             self.current_data['ratio'] = self.current_data[f'close_{self.symbol_a}'] / self.current_data[f'close_{self.symbol_b}']
         
-        self.featureManager.register_indicator(FeatureID.ZSCORE, ZScoreFeature(window=30))
+        self.featureManager.register_indicator(FeatureID.ZSCORE, ZScoreFeature(window=self.zscore_window))
         self.featureManager.update(self.current_data)
 
     def test(self) -> None:
@@ -42,7 +46,7 @@ class PairTradingStrategy(TradingStrategyInterface):
         if 'ratio' not in new_row.columns:
             new_row['ratio'] = new_row[f'close_{self.symbol_a}'] / new_row[f'close_{self.symbol_b}']
             
-        self.current_data = pd.concat([self.current_data, new_row])
+        self.current_data = pd.concat([self.current_data, new_row]).iloc[-self.max_history:]
         self.featureManager.update(self.current_data)
         
         zscore_feat = self.featureManager.get_feature(FeatureID.ZSCORE)
@@ -50,7 +54,7 @@ class PairTradingStrategy(TradingStrategyInterface):
             return []
             
         # Lissage du Z-Score sur 3 bars pour éviter les spikes
-        curr_z = zscore_feat.zscore.rolling(window=3).mean().iloc[-1]
+        curr_z = zscore_feat.zscore.rolling(window=self.smoothing_window).mean().iloc[-1]
         
         # Logique de Pair Trading
         if curr_z >= self.zscore_threshold:

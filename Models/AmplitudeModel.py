@@ -1,6 +1,7 @@
 from typing import Any, Dict, Set, cast
 from sklearn.metrics import r2_score
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.base import clone
 from sklearn.model_selection import TimeSeriesSplit
 from Features import *
 from Targets import *
@@ -87,13 +88,7 @@ class AmplitudeModel(TradingModelInterface):
             X_train, X_test = X[train_idx], X[test_idx]
             y_train, y_test = y[train_idx], y[test_idx]
 
-            model = RandomForestRegressor(
-                n_estimators=100,
-                max_depth=5,
-                min_samples_leaf=10,
-                random_state=42,
-                n_jobs=-1
-            )
+            model = clone(self.model)
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
             scores.append(r2_score(y_test, y_pred))

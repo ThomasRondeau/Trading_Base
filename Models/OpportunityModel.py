@@ -1,6 +1,7 @@
 from typing import Any, Dict, Set, cast
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import balanced_accuracy_score
+from sklearn.base import clone
 from sklearn.model_selection import TimeSeriesSplit
 from Features import *
 from Targets import *
@@ -96,14 +97,7 @@ class OpportunityModel(TradingModelInterface):
             X_train, X_test = X[train_idx], X[test_idx]
             y_train, y_test = y[train_idx], y[test_idx]
 
-            model = RandomForestClassifier(
-                n_estimators=100,
-                max_depth=5,
-                min_samples_leaf=15,
-                random_state=42,
-                n_jobs=-1,
-                class_weight='balanced'
-            )
+            model = clone(self.model)
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
             scores.append(balanced_accuracy_score(y_test, y_pred))

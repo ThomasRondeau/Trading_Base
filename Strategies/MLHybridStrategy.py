@@ -37,7 +37,7 @@ class MLHybridStrategy(TradingStrategyInterface):
         self.featureManager.register_indicator(FeatureID.RSI, RSI(window=14))
         self.featureManager.register_indicator(FeatureID.VOLUME, VOLUME(window=20))
         self.featureManager.register_indicator(FeatureID.ATR, ATR(window=14))
-        self.featureManager.register_indicator(FeatureID.MACD, MACD(long_window=12, short_window=26, signal_window=9))
+        self.featureManager.register_indicator(FeatureID.MACD, MACD(short_window=12, long_window=26, signal_window=9))
         self.featureManager.register_indicator(FeatureID.SMA_20, SMA(window=20))
         self.featureManager.register_indicator(FeatureID.DIRECTION, DirectionFeatures())
         

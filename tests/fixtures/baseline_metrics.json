@@ -1,23 +1,23 @@
 {
   "arima": {
-    "avg_pnl_net_percent": -0.020556814096855672,
+    "avg_pnl_net_percent": 0.02563332170636187,
     "max_drawdown": 0.0,
     "sharpe_ratio": 0.0,
-    "total_fees": 55.23554130000001,
-    "total_pnl_gross_percent": -0.11140810880011309,
-    "total_pnl_net_percent": -4.111362819371134,
-    "total_trades": 200.0,
-    "win_rate": 36.5
+    "total_fees": 4.9674564000000005,
+    "total_pnl_gross_percent": 0.821427573737566,
+    "total_pnl_net_percent": 0.46139979071451365,
+    "total_trades": 18.0,
+    "win_rate": 50.0
   },
   "cascade": {
-    "avg_pnl_net_percent": 0.04123879307156883,
+    "avg_pnl_net_percent": 0.04631469592793915,
     "max_drawdown": 0.0,
-    "sharpe_ratio": 93.64253382229396,
-    "total_fees": 1.44567926,
-    "total_pnl_gross_percent": 1.592400507958387,
-    "total_pnl_net_percent": 1.0722086198607896,
-    "total_trades": 26.0,
-    "win_rate": 61.53846153846154
+    "sharpe_ratio": 303.19183816603527,
+    "total_fees": 1.38992995,
+    "total_pnl_gross_percent": 1.6580658528305634,
+    "total_pnl_net_percent": 1.1578673981984788,
+    "total_trades": 25.0,
+    "win_rate": 64.0
   },
   "mean_reversion": {
     "avg_pnl_net_percent": -0.06868308717858669,
@@ -30,14 +30,14 @@
     "win_rate": 52.38095238095239
   },
   "ml_hybrid": {
-    "avg_pnl_net_percent": -0.10712257668365002,
-    "max_drawdown": -4.208333946481616,
-    "sharpe_ratio": -8.128604599740394,
-    "total_fees": 18.2881297,
-    "total_pnl_gross_percent": -2.8745702819328818,
-    "total_pnl_net_percent": -3.535045030560451,
-    "total_trades": 33.0,
-    "win_rate": 48.484848484848484
+    "avg_pnl_net_percent": -0.11479943813182751,
+    "max_drawdown": -4.346870936139647,
+    "sharpe_ratio": -8.214052365022535,
+    "total_fees": 17.732669700000002,
+    "total_pnl_gross_percent": -3.033123126875406,
+    "total_pnl_net_percent": -3.6735820202184803,
+    "total_trades": 32.0,
+    "win_rate": 46.875
   },
   "pair_trading": {
     "avg_pnl_net_percent": 0.07264123024185298,
