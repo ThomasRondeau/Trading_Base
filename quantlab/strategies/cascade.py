@@ -104,11 +104,15 @@ class CascadeStrategy(Strategy):
 
     def decide(self, bar: pd.Series) -> list[Order]:
         row = self.feed.row()
-        if self.opportunity_model.predict_row(row) != 1:
+        opportunity = int(self.opportunity_model.predict_row(row))
+        self.diagnostics = {"opportunity": opportunity}
+        if opportunity != 1:
             return []
 
-        direction = "UP" if self.direction_model.predict_row(row) == 1 else "DOWN"
+        up = int(self.direction_model.predict_row(row)) == 1
+        direction = "UP" if up else "DOWN"
         amplitude = float(self.amplitude_model.predict_row(row))  # percent
+        self.diagnostics.update(direction_up=int(up), amplitude_pct=amplitude)
         if abs(amplitude) < self.min_amplitude_threshold:
             return []
         # The direction and the sign of the amplitude must agree

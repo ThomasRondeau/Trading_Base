@@ -9,6 +9,8 @@ from __future__ import annotations
 import dataclasses
 import logging
 from dataclasses import dataclass
+from datetime import date
+from typing import Any
 
 import pandas as pd
 
@@ -37,7 +39,7 @@ class RiskManager:
         self.limits = limits or RiskLimits()
         self.halted = False
         self.halt_reason = ""
-        self._day: object = None
+        self._day: date | None = None
         self._day_start_equity = 0.0
 
     def halt(self, reason: str) -> None:
@@ -70,6 +72,19 @@ class RiskManager:
             logger.info("Order quantity clipped %d -> %d: %s", order.quantity, quantity, order)
             return dataclasses.replace(order, quantity=quantity)
         return order
+
+    def get_state(self) -> dict[str, Any]:
+        return {
+            "halted": self.halted,
+            "halt_reason": self.halt_reason,
+            "day": self._day.isoformat() if self._day else None,
+            "day_start_equity": self._day_start_equity,
+        }
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        self.halted, self.halt_reason = bool(state["halted"]), str(state["halt_reason"])
+        self._day = date.fromisoformat(state["day"]) if state["day"] else None
+        self._day_start_equity = float(state["day_start_equity"])
 
     def on_equity(self, timestamp: pd.Timestamp, equity: float) -> bool:
         """Track the daily loss; returns True when this update triggers the kill switch."""

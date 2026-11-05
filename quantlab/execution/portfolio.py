@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -50,3 +51,17 @@ class Portfolio:
     @property
     def equity(self) -> float:
         return self.cash + self.market_value
+
+    def get_state(self) -> dict[str, Any]:
+        return {
+            "initial_cash": self.initial_cash,
+            "cash": self.cash,
+            "fees_paid": self.fees_paid,
+            "positions": {s: [p.quantity, p.avg_price] for s, p in self.positions.items() if p.quantity},
+            "last_prices": dict(self.last_prices),
+        }
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        self.initial_cash, self.cash, self.fees_paid = state["initial_cash"], state["cash"], state["fees_paid"]
+        self.positions = {s: Position(int(q), float(p)) for s, (q, p) in state["positions"].items()}
+        self.last_prices = dict(state["last_prices"])

@@ -66,6 +66,7 @@ class MLHybridStrategy(Strategy):
             return []
 
         up = self.direction_model.predict_row(row) == 1
+        self.diagnostics = {"direction_up": int(up)}
         if tech_buy and up:
             return [self.order(Side.BUY, 10)]
         if tech_sell and not up:

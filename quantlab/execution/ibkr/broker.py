@@ -16,7 +16,9 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import pandas as pd
 from ibapi.commission_report import CommissionReport
@@ -84,6 +86,7 @@ class IBKRBroker:
         self._ib_ids: dict[str, int] = {}  # our order id -> IBKR order id
         self._terminal: set[int] = set()
         self._seen_execs: set[str] = set()
+        self._executed: dict[int, int] = {}  # IBKR order id -> shares executed so far
         self._awaiting_commission: dict[str, tuple[Order, Execution]] = {}
         client.order_listener = self
         client.reconnect_listeners.append(self._on_reconnect)
@@ -130,6 +133,46 @@ class IBKRBroker:
             if actual.get(symbol, 0) != expected.get(symbol, 0)
         }
 
+    # --- restart ---------------------------------------------------------------------------------------
+
+    def get_state(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "orders": {str(ib_id): order.to_dict() for ib_id, order in self._orders.items()},
+                "terminal": sorted(self._terminal),
+                "seen_execs": sorted(self._seen_execs),
+                "executed": {str(ib_id): qty for ib_id, qty in self._executed.items()},
+            }
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        with self._lock:
+            self._orders = {int(ib_id): Order.from_dict(o) for ib_id, o in state["orders"].items()}
+            self._ib_ids = {order.order_id: ib_id for ib_id, order in self._orders.items()}
+            self._terminal = set(state["terminal"])
+            self._seen_execs = set(state["seen_execs"])
+            self._executed = {int(ib_id): int(qty) for ib_id, qty in state["executed"].items()}
+
+    def recover(self, known_orders: Sequence[Order], timeout: float = 10.0) -> None:
+        """
+        After a restart (state restored): re-map working orders by their orderRef, replay the executions
+        missed while down (duplicates are ignored), then report as cancelled the orders that stopped
+        working without being fully executed. Call `process_events` afterwards to deliver it all.
+        """
+        by_ref = {order.order_id: order for order in known_orders}
+        working = self.client.open_orders(timeout)
+        with self._lock:
+            for ib_id, ref in working.items():
+                if ib_id not in self._orders and ref in by_ref:
+                    self._orders[ib_id], self._ib_ids[ref] = by_ref[ref], ib_id
+        self.client.request_executions(timeout)
+        deadline = time.monotonic() + self.commission_wait + 1.0
+        while self._awaiting_commission and time.monotonic() < deadline:  # fills before statuses
+            time.sleep(0.01)
+        for ib_id, order in list(self._orders.items()):
+            if ib_id not in working and self._executed.get(ib_id, 0) < order.quantity:
+                self._terminate(ib_id, OrderStatus.CANCELLED, "not working at IBKR after the restart")
+        logger.info("IBKR recovery: %d working orders, %d executions known", len(working), len(self._seen_execs))
+
     # --- OrderEventListener (network thread) -----------------------------------------------------------
 
     def on_order_status(self, order_id: int, status: str, filled: float, remaining: float) -> None:
@@ -147,6 +190,7 @@ class IBKRBroker:
                 return
             order = self._orders.get(execution.orderId) or self._external_order(contract, execution)
             self._awaiting_commission[execution.execId] = (order, execution)
+            self._executed[execution.orderId] = self._executed.get(execution.orderId, 0) + int(float(execution.shares))
         timer = threading.Timer(self.commission_wait, self._emit_fill, (execution.execId, 0.0))
         timer.daemon = True
         timer.start()

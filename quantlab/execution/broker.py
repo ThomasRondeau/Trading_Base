@@ -9,7 +9,7 @@ them on the strategy thread (see `StrategyRunner`).
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol
+from typing import Any, Protocol
 
 import pandas as pd
 
@@ -37,3 +37,9 @@ class Broker(Protocol):
     def on_bar(self, bar: pd.Series) -> None:
         """Called with each new bar before the strategies see it (the simulator matches orders here)."""
         ...
+
+    def get_state(self) -> dict[str, Any]:
+        """JSON-serializable state needed to resume after a restart."""
+        ...
+
+    def set_state(self, state: dict[str, Any]) -> None: ...

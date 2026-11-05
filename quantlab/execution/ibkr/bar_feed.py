@@ -23,7 +23,7 @@ from typing import Any
 import pandas as pd
 
 from quantlab.data.schema import OHLCV_COLUMNS
-from quantlab.execution.ibkr.client import IBKRClient, stock
+from quantlab.execution.ibkr.client import IBKRClient, IBKRRequestError, stock
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ class IBKRBarFeed:
         self.bar_seconds = bar_seconds
         self.use_rth = use_rth
         self.heartbeat = heartbeat
-        self._queue: queue.SimpleQueue[dict[str, Any]] = queue.SimpleQueue()
+        self._queue: queue.SimpleQueue[dict[str, Any] | IBKRRequestError] = queue.SimpleQueue()
         self._aggregators = {symbol: BarAggregator(bar_seconds) for symbol in self.symbols}
         self._pending: dict[int, dict[str, _Bar]] = {}  # period start -> symbol -> bar
         self._last: dict[str, _Bar] = {}
@@ -126,7 +126,9 @@ class IBKRBarFeed:
     def __iter__(self) -> Iterator[pd.Series | None]:
         self._stop.clear()
         req_ids = [
-            self.client.subscribe_realtime_bars(stock(symbol), self._queue.put, use_rth=self.use_rth)
+            self.client.subscribe_realtime_bars(
+                stock(symbol), self._queue.put, use_rth=self.use_rth, on_error=self._queue.put
+            )
             for symbol in self.symbols
         ]
         try:
@@ -136,6 +138,8 @@ class IBKRBarFeed:
                 except queue.Empty:
                     yield None
                     continue
+                if isinstance(raw, IBKRRequestError):
+                    raise raw  # no live data: never wait silently
                 yield from self._on_realtime_bar(raw)
         finally:
             for req_id in req_ids:

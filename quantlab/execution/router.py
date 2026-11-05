@@ -13,11 +13,12 @@ time exit is in flight) can over-close a lot: the excess becomes a new lot that 
 
 from __future__ import annotations
 
-import itertools
+import dataclasses
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 import pandas as pd
 
@@ -87,6 +88,23 @@ class Lot:
     protective_ids: set[str] = field(default_factory=set)
     exit_order_id: str | None = None
 
+    _TIMES = ("entry_time", "exit_time")
+
+    def to_dict(self) -> dict[str, Any]:
+        data = dataclasses.asdict(self)
+        data["side"] = self.side.value
+        data["protective_ids"] = sorted(self.protective_ids)
+        for key in self._TIMES:
+            data[key] = data[key].isoformat() if data[key] is not None else None
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Lot:
+        data = dict(data, side=Side(data["side"]), protective_ids=set(data["protective_ids"]))
+        for key in cls._TIMES:
+            data[key] = pd.Timestamp(data[key]) if data[key] is not None else None
+        return cls(**data)
+
 
 @dataclass
 class _Tracked:
@@ -113,7 +131,7 @@ class OrderRouter:
         self.trades: list[Trade] = []
         self.fill_listeners: list[Callable[[Fill], None]] = []
         self._orders: dict[str, _Tracked] = {}
-        self._lot_ids = (f"lot{i}" for i in itertools.count(1))
+        self._lot_seq = 0
         broker.set_handlers(self.on_fill, self.on_status)
 
     # --- entries ---------------------------------------------------------------------------------------
@@ -132,7 +150,7 @@ class OrderRouter:
         checked = self.risk.check_entry(order, self.exposure(order.symbol))
         if checked is None:
             return None
-        lot = Lot(next(self._lot_ids), order.strategy_id, order.symbol, order.side, holding_bars, checked.order_id)
+        lot = Lot(self._next_lot_id(), order.strategy_id, order.symbol, order.side, holding_bars, checked.order_id)
         self.lots[lot.lot_id] = lot
         self._send(checked, Role.ENTRY, lot.lot_id)
         return checked
@@ -214,7 +232,36 @@ class OrderRouter:
                 trades.append(self._trade(lot, lot.quantity, prices[lot.symbol], timestamp, "open"))
         return trades
 
+    # --- persistence -----------------------------------------------------------------------------------
+
+    def get_state(self) -> dict[str, Any]:
+        """Open lots and the orders that can still affect them (closed trades live in the journal)."""
+        orders = [
+            {"order": t.order.to_dict(), "role": t.role.value, "lot_id": t.lot_id, "reason": t.reason,
+             "filled": t.filled}
+            for t in self._orders.values()
+            if t.lot_id in self.lots or t.remaining > 0
+        ]  # fmt: skip
+        return {"lot_seq": self._lot_seq, "lots": [lot.to_dict() for lot in self.lots.values()], "orders": orders}
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        self._lot_seq = int(state["lot_seq"])
+        self.lots = {lot.lot_id: lot for lot in map(Lot.from_dict, state["lots"])}
+        self._orders = {
+            o["order"]["order_id"]: _Tracked(Order.from_dict(o["order"]), Role(o["role"]), o["lot_id"], o["reason"],
+                                             int(o["filled"]))
+            for o in state["orders"]
+        }  # fmt: skip
+
+    def orders(self) -> list[Order]:
+        """Every order the router knows of (to re-map broker orders after a restart)."""
+        return [t.order for t in self._orders.values()]
+
     # --- internals -------------------------------------------------------------------------------------
+
+    def _next_lot_id(self) -> str:
+        self._lot_seq += 1
+        return f"lot{self._lot_seq}"
 
     def _send(self, order: Order, role: Role, lot_id: str, reason: str = "") -> None:
         self._orders[order.order_id] = _Tracked(order, role, lot_id, reason)
@@ -298,7 +345,7 @@ class OrderRouter:
 
     def _open_correction(self, symbol: str, side: Side, quantity: int, fill: Fill) -> None:
         """Unintended shares (over-fill): track them as a lot and close it immediately."""
-        lot = Lot(next(self._lot_ids), fill.order.strategy_id, symbol, side, holding_bars=0, entry_done=True)
+        lot = Lot(self._next_lot_id(), fill.order.strategy_id, symbol, side, holding_bars=0, entry_done=True)
         lot.quantity = lot.entry_quantity = quantity
         lot.entry_price, lot.entry_time = fill.price, fill.timestamp
         self.lots[lot.lot_id] = lot

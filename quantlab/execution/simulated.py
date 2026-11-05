@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import math
+from typing import Any
 
 import pandas as pd
 
@@ -52,6 +53,13 @@ class SimulatedBroker:
 
     def process_events(self) -> None:
         """Fills are delivered synchronously from `on_bar`."""
+
+    def get_state(self) -> dict[str, Any]:
+        return {"pending": [o.to_dict() for o in self._pending.values()], "positions": dict(self._positions)}
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        self._pending = {o.order_id: o for o in map(Order.from_dict, state["pending"])}
+        self._positions = {s: int(q) for s, q in state["positions"].items()}
 
     @property
     def pending_orders(self) -> list[Order]:

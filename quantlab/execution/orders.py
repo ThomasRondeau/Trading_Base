@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
+from typing import Any
 
 import pandas as pd
 
@@ -63,6 +64,13 @@ class Order:
             raise ValueError("A limit order needs a limit_price.")
         if self.order_type is OrderType.STOP and self.stop_price is None:
             raise ValueError("A stop order needs a stop_price.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**asdict(self), "side": self.side.value, "order_type": self.order_type.value}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Order:
+        return cls(**data)
 
 
 @dataclass(frozen=True)

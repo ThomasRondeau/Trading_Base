@@ -137,6 +137,7 @@ class _BarSubscription:
     contract: Contract
     callback: Callable[[dict[str, Any]], None]
     use_rth: bool
+    on_error: Callable[[IBKRRequestError], None] | None = None
 
 
 class IBKRClient(EWrapper):  # type: ignore[misc]
@@ -163,6 +164,7 @@ class IBKRClient(EWrapper):  # type: ignore[misc]
         self._next_order_id: int | None = None
         self._requests: dict[int, _Request] = {}
         self._positions: _Request | None = None
+        self._open_orders: _Request | None = None
         self._subscriptions: dict[int, _BarSubscription] = {}
         self._closing = False
         self._reconnecting = False
@@ -260,8 +262,13 @@ class IBKRClient(EWrapper):  # type: ignore[misc]
             request.error = IBKRRequestError(reqId, errorCode, errorString)
             request.done.set()
             return
-        if reqId in self._subscriptions:
-            logger.error("IBKR real-time bars %s: [%s] %s", reqId, errorCode, errorString)
+        sub = self._subscriptions.get(reqId)
+        if sub is not None:
+            # e.g. 10089 / 354: no market data subscription for the API. The stream will never start.
+            logger.error("IBKR real-time bars %s (%s): [%s] %s", reqId, sub.contract.symbol, errorCode, errorString)
+            del self._subscriptions[reqId]
+            if sub.on_error is not None:
+                sub.on_error(IBKRRequestError(reqId, errorCode, errorString))
             return
         if reqId > 0 and self.order_listener is not None and errorCode not in ORDER_WARNING_CODES:
             self.order_listener.on_order_error(reqId, errorCode, errorString)
@@ -381,11 +388,18 @@ class IBKRClient(EWrapper):  # type: ignore[misc]
     # --- real-time bars --------------------------------------------------------------------------------
 
     def subscribe_realtime_bars(
-        self, contract: Contract, callback: Callable[[dict[str, Any]], None], use_rth: bool = False
+        self,
+        contract: Contract,
+        callback: Callable[[dict[str, Any]], None],
+        use_rth: bool = False,
+        on_error: Callable[[IBKRRequestError], None] | None = None,
     ) -> int:
-        """5-second TRADES bars; `callback(bar)` runs on the network thread. Restored after a reconnect."""
+        """
+        5-second TRADES bars; `callback(bar)` runs on the network thread. Restored after a reconnect.
+        `on_error` is called (network thread) if TWS refuses or ends the subscription.
+        """
         req_id = self._new_req_id()
-        self._subscriptions[req_id] = _BarSubscription(contract, callback, use_rth)
+        self._subscriptions[req_id] = _BarSubscription(contract, callback, use_rth, on_error)
         self.api.reqRealTimeBars(req_id, contract, 5, "TRADES", use_rth, [])
         logger.info("Real-time bars for %s (reqId %s)", contract.symbol, req_id)
         return req_id
@@ -439,9 +453,30 @@ class IBKRClient(EWrapper):  # type: ignore[misc]
         _ensure_orders_allowed(self.settings, "cancel_order")
         self.api.cancelOrder(order_id, OrderCancel())
 
-    def request_executions(self) -> None:
-        """Re-send today's executions (after a reconnect); the listener must ignore duplicates."""
-        self.api.reqExecutions(self._new_req_id(), ExecutionFilter())
+    def request_executions(self, timeout: float | None = None) -> None:
+        """
+        Re-send today's executions to the order listener (after a reconnect / restart; the listener must
+        ignore duplicates). With a `timeout`, wait until TWS has sent them all.
+        """
+        req_id = self._new_req_id()
+        request = self._requests[req_id] = _Request()
+        try:
+            self.api.reqExecutions(req_id, ExecutionFilter())
+            if timeout is not None and not request.done.wait(timeout):
+                raise TimeoutError("Executions request timed out.")
+        finally:
+            self._requests.pop(req_id, None)
+
+    def open_orders(self, timeout: float = 10.0) -> dict[int, str]:
+        """Working orders of this client id: {IBKR order id: orderRef}."""
+        request = self._open_orders = _Request()
+        self.api.reqOpenOrders()
+        try:
+            if not request.done.wait(timeout):
+                raise TimeoutError("Open orders request timed out.")
+        finally:
+            self._open_orders = None
+        return dict(request.rows)
 
     def orderStatus(
         self,
@@ -462,6 +497,22 @@ class IBKRClient(EWrapper):  # type: ignore[misc]
 
     def openOrder(self, orderId: int, contract: Contract, order: IBOrder, orderState: OrderState) -> None:
         logger.debug("Open order %s %s %s: %s", orderId, order.action, contract.symbol, orderState.status)
+        if self._open_orders is not None and orderState.status not in (
+            "Filled",
+            "Cancelled",
+            "ApiCancelled",
+            "Inactive",
+        ):
+            self._open_orders.rows.append((orderId, order.orderRef))
+
+    def openOrderEnd(self) -> None:
+        if self._open_orders is not None:
+            self._open_orders.done.set()
+
+    def execDetailsEnd(self, reqId: int) -> None:
+        request = self._requests.get(reqId)
+        if request is not None:
+            request.done.set()
 
     def execDetails(self, reqId: int, contract: Contract, execution: Execution) -> None:
         if self.order_listener is not None:

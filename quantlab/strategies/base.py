@@ -31,6 +31,8 @@ class Strategy(ABC):
         self.strategy_id = strategy_id or type(self).__name__
         self.is_running = False
         self._feed: FeatureFeed | None = None
+        #: values explaining the last decision (e.g. model predictions); journaled with each bar
+        self.diagnostics: dict[str, float] = {}
 
     # --- to implement ----------------------------------------------------------------------------------
 
@@ -55,9 +57,13 @@ class Strategy(ABC):
 
     def fit(self, history: pd.DataFrame) -> None:
         """Warm the feature buffer with `history`, then train the models."""
+        self.warm(history)
+        self.train(history)
+
+    def warm(self, history: pd.DataFrame) -> None:
+        """(Re)build the feature buffer from `history` without retraining (restart of a live session)."""
         self._feed = FeatureFeed(FeaturePipeline(self.features()), min_history=self.min_history)
         self._feed.warm_start(history)
-        self.train(history)
 
     def prepare(self, upcoming: pd.DataFrame) -> None:
         """Backtest only: precompute the features of the upcoming bars (same values as bar by bar)."""
@@ -73,6 +79,7 @@ class Strategy(ABC):
         """Feed the bar and return the orders to send (none while stopped or not warmed up)."""
         if not self.is_running:
             return []
+        self.diagnostics = {}
         self.feed.update(bar)
         if not self.feed.ready:
             return []

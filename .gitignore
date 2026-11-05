@@ -12,3 +12,6 @@ venv/
 # Local data and outputs
 data_cache/
 Logs/
+
+# Live sessions (journal, state, strategy snapshots)
+sessions/

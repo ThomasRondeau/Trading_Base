@@ -32,6 +32,7 @@ class ArimaStrategy(Strategy):
     def decide(self, bar: pd.Series) -> list[Order]:
         closes = self.feed.bars(self.forecaster.window)["close"].to_numpy()
         prediction = self.forecaster.forecast_change(closes)
+        self.diagnostics = {"forecast_change": float(prediction)}
         if abs(prediction) / float(bar["close"]) * 1e4 < self.min_edge_bps:
             return []
         return [self.order(Side.BUY if prediction > 0 else Side.SELL, 5)]
