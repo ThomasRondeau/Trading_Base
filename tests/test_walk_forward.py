@@ -5,13 +5,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from Engines.WalkForwardOptimizer import WalkForwardOptimizer, expand_grid, make_folds
-from Strategies.TradingStrategyInterface import TradingStrategyInterface
-from Types.Order import Order
+from quantlab.backtest.walk_forward import WalkForwardOptimizer, expand_grid, make_folds
+from quantlab.execution.orders import Order
+from quantlab.strategies.base import TradingStrategyInterface
 
 
 class EveryNBarsStrategy(TradingStrategyInterface):
-    """Stratégie factice : achète toutes les `period` barres."""
+    """Dummy strategy: buys every `period` bars."""
 
     instances = 0
 
@@ -19,36 +19,36 @@ class EveryNBarsStrategy(TradingStrategyInterface):
         super().__init__()
         self.period = period
         self.trained = False
-        self.IsRunning = False
+        self.is_running = False
         self._bar = 0
         EveryNBarsStrategy.instances += 1
 
     def train(self, training_data: Any) -> None:
-        assert not self.trained, "une instance ne doit être entraînée qu'une fois"
+        assert not self.trained, "an instance must be trained only once"
         self.trained = True
 
-    def test(self) -> None:  # type: ignore[override]
+    def test(self) -> None:
         pass
 
     def update_status(self, is_running: bool) -> None:
-        self.IsRunning = is_running
+        self.is_running = is_running
 
     def on_bar(self, bar: pd.Series) -> list[Order]:
         self._bar += 1
         if self._bar % self.period == 0:
-            return [Order(strategy_ID=0, symbol="TEST", side="BUY", quantity=1)]
+            return [Order(strategy_id=0, symbol="TEST", side="BUY", quantity=1)]
         return []
 
     def stop(self) -> None:
-        self.IsRunning = False
+        self.is_running = False
 
-    def get_status(self) -> str:
-        return str(self.IsRunning)
+    def get_status(self) -> bool:
+        return self.is_running
 
 
 def make_data(n: int) -> pd.DataFrame:
     index = pd.date_range("2025-01-01", periods=n, freq="h")
-    close = 100 + np.cumsum(np.full(n, 0.05))  # tendance haussière : acheter souvent est gagnant
+    close = 100 + np.cumsum(np.full(n, 0.05))  # uptrend: buying often wins
     return pd.DataFrame({"open": close, "high": close, "low": close, "close": close, "volume": 1.0}, index=index)
 
 
@@ -98,7 +98,7 @@ def test_optimizer_selects_best_params_and_uses_fresh_instances() -> None:
 
     n_folds = len(result.folds)
     assert n_folds > 0
-    # 2 combinaisons évaluées + 1 ré-entraînement par fold, chacun sur une instance neuve.
+    # 2 combinations evaluated + 1 refit per fold, each on a fresh instance.
     assert EveryNBarsStrategy.instances == n_folds * 3
     for fold_result in result.folds:
         assert fold_result.best_params == {"period": 3}

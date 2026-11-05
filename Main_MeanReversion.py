@@ -1,29 +1,26 @@
-import traceback
-from Connections.DataManager import DataManager
-from Strategies.MeanReversionStrategy import MeanReversionStrategy
-from Engines.BacktestEngine import BacktestEngine
+import logging
 
-def main():
-    print("Démarrage du backtest Mean Reversion...")
-    
+from quantlab.backtest.engine import BacktestEngine
+from quantlab.data.data_manager import DataManager
+from quantlab.strategies.mean_reversion import MeanReversionStrategy
+
+logger = logging.getLogger(__name__)
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logger.info("Starting mean reversion backtest (yfinance)...")
     try:
-        strategy = MeanReversionStrategy()
         engine = BacktestEngine()
-        dm = DataManager()
-
-        training_data = dm.collect_data_yfinance("AAPL", 50, 5)
-        backtest_data = dm.collect_data_yfinance("AAPL", 5, 0)
-
-        engine.set_training_data(training_data)
-        engine.set_backtest_data(backtest_data)
-        engine.add_strategy(strategy)
-        
+        data_manager = DataManager()
+        engine.set_training_data(data_manager.collect_data_yfinance("AAPL", 50, 5))
+        engine.set_backtest_data(data_manager.collect_data_yfinance("AAPL", 5, 0))
+        engine.add_strategy(MeanReversionStrategy())
         engine.train_strategies()
         engine.run()
-        
-    except Exception as e:
-        print(f"Erreur : {e}")
-        print(traceback.format_exc())
+    except Exception:
+        logger.exception("Backtest failed")
+
 
 if __name__ == "__main__":
     main()

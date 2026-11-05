@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar
@@ -12,25 +11,21 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import Connections.DataManager as data_manager_module
-import Connections.MassiveAPI as massive_module
-import Models.ArimaModel as arima_module
-from Connections.DataManager import DataManager
-from Connections.MassiveAPI import MassiveAPIClient
-from Connections.schema import validate_ohlcv
-from Features import FeatureID
-from Features.Base.ADX import ADXFeature
-from Features.Base.MACD import MACD
-from Features.Base.Vwap import Vwap
-from Strategies.ArimaStrategy import ArimaStrategy
-from Strategies.CascadeStrategy import CascadeStrategy
-from Strategies.MLHybridStrategy import MLHybridStrategy
-from Strategies.PairTradingStrategy import PairTradingStrategy
-from Strategies.TrendFollowingStrategy import TrendFollowingStrategy
-from Targets.Models.Target_Opportunity import Target_Opportunity
-
-# `Models/__init__` re-exports the class under the module's name, shadowing the attribute: go through sys.modules.
-direction_module = sys.modules["Models.DirectionModel"]
+import quantlab.data.data_manager as data_manager_module
+import quantlab.data.massive as massive_module
+import quantlab.models.arima as arima_module
+import quantlab.models.base as model_base_module
+from quantlab.data.data_manager import DataManager
+from quantlab.data.massive import MassiveAPIClient
+from quantlab.data.schema import validate_ohlcv
+from quantlab.features.feature_id import FeatureID
+from quantlab.features.technical import ADX, MACD, VWAP
+from quantlab.strategies.arima import ArimaStrategy
+from quantlab.strategies.cascade import CascadeStrategy
+from quantlab.strategies.ml_hybrid import MLHybridStrategy
+from quantlab.strategies.pair_trading import PairTradingStrategy
+from quantlab.strategies.trend_following import TrendFollowingStrategy
+from quantlab.targets.forward import TargetOpportunity
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -164,7 +159,7 @@ def test_macd_rejects_inverted_windows() -> None:
 def test_strategies_register_macd_12_26(factory: Any, aapl: pd.DataFrame) -> None:
     strategy = factory()
     strategy.train(aapl.iloc[:600])
-    macd = strategy.featureManager._indicators[FeatureID.MACD]
+    macd = strategy.feature_manager._indicators[FeatureID.MACD]
     assert (macd.short_window, macd.long_window) == (12, 26)
 
 
@@ -173,7 +168,7 @@ def test_strategies_register_macd_12_26(factory: Any, aapl: pd.DataFrame) -> Non
 
 def test_adx_keeps_data_index() -> None:
     data = ohlcv(100)
-    adx = ADXFeature(window=14)
+    adx = ADX(window=14)
     adx.update(data)
     adx.calculate({})
     assert adx.adx.index.equals(data.index)
@@ -188,7 +183,7 @@ def test_vwap_resets_each_session() -> None:
     day1 = ohlcv(30, start="2026-01-05 14:30")
     day2 = ohlcv(30, start="2026-01-06 14:30")
     data = pd.concat([day1, day2])
-    vwap = Vwap(data)
+    vwap = VWAP(data)
     vwap.calculate()
 
     typical = (data["close"] + data["high"] + data["low"]) / 3
@@ -242,16 +237,16 @@ def test_arima_trades_when_edge_exceeds_costs(monkeypatch: pytest.MonkeyPatch, a
 
 def test_cross_validate_clones_configured_model(monkeypatch: pytest.MonkeyPatch, aapl: pd.DataFrame) -> None:
     depths: list[int] = []
-    real_clone = direction_module.clone
+    real_clone = model_base_module.clone
 
     def spy_clone(estimator: Any) -> Any:
         depths.append(estimator.get_params()["max_depth"])
         return real_clone(estimator)
 
-    monkeypatch.setattr(direction_module, "clone", spy_clone)
+    monkeypatch.setattr(model_base_module, "clone", spy_clone)
     strategy = MLHybridStrategy(max_depth=7)
     strategy.train(aapl.iloc[:600])
-    strategy.directionModel.cross_validate(n_splits=2)
+    strategy.direction_model.cross_validate(n_splits=2)
     assert depths == [7, 7]  # used to be a hard-coded max_depth=4
 
 
@@ -260,7 +255,7 @@ def test_cross_validate_clones_configured_model(monkeypatch: pytest.MonkeyPatch,
 
 def test_opportunity_threshold_is_used() -> None:
     data = pd.DataFrame({"close": [100.0, 100.0, 100.0, 100.1, 100.0, 100.0, 100.0]})
-    loose, strict = Target_Opportunity(threshold_pct=0.05, horizon=3), Target_Opportunity(threshold_pct=0.5, horizon=3)
+    loose, strict = TargetOpportunity(threshold_pct=0.05, horizon=3), TargetOpportunity(threshold_pct=0.5, horizon=3)
     for target in (loose, strict):
         target.update(data, training_data_shift=0)
         target.calculate()
@@ -274,7 +269,7 @@ def test_opportunity_threshold_is_used() -> None:
 def test_trend_following_ids_match_windows(aapl: pd.DataFrame) -> None:
     strategy = TrendFollowingStrategy(sma_fast=10, sma_slow=50)
     strategy.train(aapl.iloc[:300])
-    indicators = strategy.featureManager._indicators
+    indicators = strategy.feature_manager._indicators
     assert indicators[FeatureID.SMA_FAST].window == 10
     assert indicators[FeatureID.SMA_SLOW].window == 50
     assert FeatureID.SMA_5 not in indicators
@@ -300,6 +295,8 @@ def test_no_direct_trading_app_construction() -> None:
     offenders = [
         str(path.relative_to(ROOT))
         for path in ROOT.rglob("*.py")
-        if "tests" not in path.parts and re.search(r"\bTradingApp\(\)", path.read_text(encoding="utf-8"))
+        if "tests" not in path.parts
+        and ".git" not in path.parts
+        and re.search(r"\bTradingApp\(\)", path.read_text(encoding="utf-8"))
     ]
     assert offenders == []

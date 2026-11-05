@@ -1,58 +1,44 @@
-import time
+import logging
 import threading
-import traceback
+import time
 
-from Connections.TradingApp import TradingApp
-from Connections.DataManager import DataManager
-from Strategies.CascadeStrategy import CascadeStrategy
-from Engines import BacktestEngine
+from quantlab.backtest.engine import BacktestEngine
+from quantlab.data.data_manager import DataManager
+from quantlab.execution.ibkr.trading_app import TradingApp
+from quantlab.strategies.cascade import CascadeStrategy
+
+logger = logging.getLogger(__name__)
 
 
-def main():
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     app = TradingApp.get_instance()
     app.connect("127.0.0.1", 7497, clientId=5)
+    threading.Thread(target=app.run, daemon=True).start()
 
-    api_thread = threading.Thread(target=app.run, daemon=True)
-    api_thread.start()
-
-    timeout = 10  # 10 secondes
+    timeout = 10
     start_time = time.time()
-    
     while not app.connected and (time.time() - start_time) < timeout:
-        print("En attente de connexion...")
+        logger.info("Waiting for the TWS/IB Gateway connection...")
         time.sleep(1)
-
     if not app.connected:
-        print("Not Connected to TWS/IB Gateway")
+        logger.error("Not connected to TWS/IB Gateway")
         return
-    print("Connected to TWS/IB Gateway")
 
-
-    #ICI QUE JE DOIS ECIRER LE CODE DE BACKTESTING / TRADING
     try:
-        cascadeStrategy = CascadeStrategy()
-        BacktestingEngine = BacktestEngine()
-        dataManager = DataManager()
-
-        training_data = dataManager.collect_training_data("AAPL", 10, 3)
-        backtest_data = dataManager.collect_training_data("AAPL", 3)
-
-        BacktestingEngine.set_training_data(training_data)
-        BacktestingEngine.set_backtest_data(backtest_data)
-        
-
-        BacktestingEngine.add_strategy(cascadeStrategy)
-        BacktestingEngine.train_strategies()
-        BacktestingEngine.run()
-
-    except Exception as e:
-        print(f"Erreur lors de l'exécution de la stratégie: {e}")
-        print(traceback.format_exc())
-    
-
-    if app.connected:
-        app.disconnect()
-        print("Déconnexion")
+        data_manager = DataManager()
+        engine = BacktestEngine()
+        engine.set_training_data(data_manager.collect_training_data("AAPL", 10, 3))
+        engine.set_backtest_data(data_manager.collect_training_data("AAPL", 3))
+        engine.add_strategy(CascadeStrategy())
+        engine.train_strategies()
+        engine.run()
+    except Exception:
+        logger.exception("Strategy run failed")
+    finally:
+        if app.connected:
+            app.disconnect()
+            logger.info("Disconnected")
 
 
 if __name__ == "__main__":

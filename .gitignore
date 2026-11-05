@@ -9,6 +9,6 @@ venv/
 # Secrets
 .env
 
-# Données et sorties locales
-Connections/*_historical_data.csv
+# Local data and outputs
+data_cache/
 Logs/

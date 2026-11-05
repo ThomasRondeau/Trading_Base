@@ -1,35 +1,34 @@
 """
-Optimisation walk-forward générique des hyperparamètres d'une stratégie.
+Generic walk-forward hyperparameter optimization for a strategy.
 
-Découpage de chaque fold (positions dans le DataFrame, ordre chronologique) :
+Each fold (DataFrame positions, chronological order):
 
     [ train ][ embargo ][ validation ][ embargo ][ test ]
 
-Pour chaque fold :
-  1. chaque combinaison de la grille est entraînée sur `train` et évaluée sur `validation` ;
-  2. la meilleure combinaison (selon `objective`) est ré-entraînée sur `train + validation` ;
-  3. elle est évaluée une seule fois sur `test`, qui n'a jamais servi à choisir les paramètres.
+For each fold:
+  1. every grid combination is trained on `train` and scored on `validation`;
+  2. the best combination (by `objective`) is retrained on `train + validation`;
+  3. it is scored once on `test`, which was never used to choose the parameters.
 
-Les scores `test` concaténés de tous les folds forment l'estimation out-of-sample.
-L'embargo retire des barres entre les blocs pour éviter que des cibles calculées
-sur des prix futurs (Target_Plus_N, training_data_shift) ne débordent sur le bloc suivant.
+The concatenated `test` scores are the out-of-sample estimate. The embargo drops bars between
+blocks so that targets built from future prices (forward targets, training_data_shift) cannot
+leak into the next block.
 """
 
 from __future__ import annotations
 
 import contextlib
-import io
 import itertools
 import logging
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
 
-from Engines.BacktestEngine import BacktestEngine
-from Strategies.TradingStrategyInterface import TradingStrategyInterface
+from quantlab.backtest.engine import BacktestEngine
+from quantlab.strategies.base import TradingStrategyInterface
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,7 @@ Metrics = dict[str, Any]
 
 @dataclass(frozen=True)
 class WalkForwardFold:
-    """Bornes (positions iloc, fin exclue) des blocs d'un fold."""
+    """Block bounds of a fold (iloc positions, end excluded)."""
 
     index: int
     train: slice
@@ -64,7 +63,7 @@ class WalkForwardResult:
     folds: list[FoldResult] = field(default_factory=list)
 
     def summary(self) -> pd.DataFrame:
-        """Une ligne par fold : paramètres retenus, score de validation et métriques de test."""
+        """One row per fold: chosen parameters, validation score and test metrics."""
         rows: list[dict[str, Any]] = []
         for res in self.folds:
             row: dict[str, Any] = {"fold": res.fold.index, **res.best_params}
@@ -84,19 +83,19 @@ class WalkForwardResult:
         return sum(valid) / len(valid) if valid else float("nan")
 
     def param_stability(self) -> pd.Series:
-        """Fréquence de chaque combinaison retenue : une combinaison qui change à chaque fold est un signe de bruit."""
+        """How often each combination was chosen: a combination that changes every fold signals noise."""
         labels = [", ".join(f"{k}={v}" for k, v in res.best_params.items()) for res in self.folds]
         return pd.Series(labels, dtype="object").value_counts()
 
 
 def expand_grid(param_grid: Mapping[str, Sequence[Any]]) -> list[Params]:
-    """Produit cartésien d'une grille {nom: [valeurs]} -> liste de dicts de paramètres."""
+    """Cartesian product of a {name: [values]} grid -> list of parameter dicts."""
     if not param_grid:
         return [{}]
     names = list(param_grid)
     for name in names:
         if len(param_grid[name]) == 0:
-            raise ValueError(f"La grille du paramètre '{name}' est vide.")
+            raise ValueError(f"The grid of parameter '{name}' is empty.")
     return [dict(zip(names, values, strict=True)) for values in itertools.product(*(param_grid[n] for n in names))]
 
 
@@ -110,20 +109,20 @@ def make_folds(
     anchored: bool = False,
 ) -> list[WalkForwardFold]:
     """
-    Calcule les folds walk-forward.
+    Compute the walk-forward folds.
 
-    :param anchored: si True, le début du train reste à 0 et le train s'agrandit à chaque fold ;
-                     sinon la fenêtre de train glisse (taille constante).
-    :param step: décalage entre deux folds (par défaut `test_size`, soit des blocs de test contigus).
+    :param anchored: if True the train block always starts at 0 and grows each fold;
+                     otherwise the train window slides with a constant size.
+    :param step: shift between two folds (defaults to `test_size`: contiguous test blocks).
     """
     for name, value in (("train_size", train_size), ("validation_size", validation_size), ("test_size", test_size)):
         if value <= 0:
-            raise ValueError(f"{name} doit être > 0 (reçu {value}).")
+            raise ValueError(f"{name} must be > 0 (got {value}).")
     if embargo < 0:
-        raise ValueError(f"embargo doit être >= 0 (reçu {embargo}).")
+        raise ValueError(f"embargo must be >= 0 (got {embargo}).")
     step = test_size if step is None else step
     if step <= 0:
-        raise ValueError(f"step doit être > 0 (reçu {step}).")
+        raise ValueError(f"step must be > 0 (got {step}).")
 
     folds: list[WalkForwardFold] = []
     k = 0
@@ -149,11 +148,28 @@ def make_folds(
     return folds
 
 
+@contextlib.contextmanager
+def _quiet(enabled: bool) -> Iterator[None]:
+    """Silence the per-backtest INFO logs of the engine and strategies."""
+    if not enabled:
+        yield
+        return
+    noisy = [logging.getLogger(name) for name in ("quantlab.backtest.engine", "quantlab.strategies")]
+    previous = [lg.level for lg in noisy]
+    for lg in noisy:
+        lg.setLevel(logging.WARNING)
+    try:
+        yield
+    finally:
+        for lg, level in zip(noisy, previous, strict=True):
+            lg.setLevel(level)
+
+
 class WalkForwardOptimizer:
     """
-    Recherche des hyperparamètres d'une stratégie par walk-forward.
+    Walk-forward search of a strategy's hyperparameters.
 
-    Exemple :
+    Example:
         optimizer = WalkForwardOptimizer(
             strategy_factory=TrendFollowingStrategy,
             param_grid={"sma_fast": [5, 10], "sma_slow": [20, 50]},
@@ -162,8 +178,8 @@ class WalkForwardOptimizer:
         result = optimizer.run(data)
         print(result.summary())
 
-    `strategy_factory(**params)` doit renvoyer une instance *neuve* à chaque appel :
-    les stratégies enregistrent leurs features dans `train()` et ne peuvent pas être ré-entraînées.
+    `strategy_factory(**params)` must return a *fresh* instance on every call: strategies register
+    their features in `train()` and cannot be retrained.
     """
 
     def __init__(
@@ -204,9 +220,9 @@ class WalkForwardOptimizer:
         )
         if not folds:
             needed = self.train_size + self.validation_size + self.test_size + 2 * self.embargo
-            raise ValueError(f"Pas assez de données pour un seul fold : {len(data)} barres, {needed} nécessaires.")
+            raise ValueError(f"Not enough data for a single fold: {len(data)} bars, {needed} needed.")
 
-        logger.info("Walk-forward : %d folds x %d combinaisons", len(folds), len(self.candidates))
+        logger.info("Walk-forward: %d folds x %d combinations", len(folds), len(self.candidates))
         result = WalkForwardResult(objective=self.objective)
         for fold in folds:
             result.folds.append(self._run_fold(data, fold))
@@ -218,23 +234,27 @@ class WalkForwardOptimizer:
 
         grid_scores: list[tuple[Params, float]] = []
         for params in self.candidates:
-            metrics = self._backtest(params, train, validation)
-            score = self._score(metrics)
+            score = self._score(self._backtest(params, train, validation))
             grid_scores.append((params, score))
             logger.debug("Fold %d %s -> %s=%.4f", fold.index, params, self.objective, score)
 
         best_params, best_score = max(grid_scores, key=lambda item: item[1])
         if not math.isfinite(best_score):
-            logger.warning("Fold %d : aucune combinaison valide (erreurs ou < %d trades).", fold.index, self.min_trades)
+            logger.warning("Fold %d: no valid combination (errors or < %d trades).", fold.index, self.min_trades)
 
-        # Ré-entraînement sur train + validation (l'embargo entre les deux inclus), puis test unique.
+        # Refit on train + validation (embargo between them included), then a single test run
         refit = data.iloc[fold.train.start : fold.validation.stop]
         test = data.iloc[fold.test]
         test_metrics = self._backtest(best_params, refit, test)
         test_score = self._score(test_metrics)
         logger.info(
-            "Fold %d : best=%s | validation %s=%.4f | test %s=%.4f",
-            fold.index, best_params, self.objective, best_score, self.objective, test_score,
+            "Fold %d: best=%s | validation %s=%.4f | test %s=%.4f",
+            fold.index,
+            best_params,
+            self.objective,
+            best_score,
+            self.objective,
+            test_score,
         )
         return FoldResult(
             fold=fold,
@@ -246,10 +266,9 @@ class WalkForwardOptimizer:
         )
 
     def _backtest(self, params: Params, training_data: pd.DataFrame, backtest_data: pd.DataFrame) -> Metrics:
-        """Entraîne une stratégie neuve sur `training_data` et renvoie les métriques du backtest. {} en cas d'erreur."""
-        output = contextlib.nullcontext() if self.verbose else contextlib.redirect_stdout(io.StringIO())
+        """Train a fresh strategy on `training_data` and return the backtest metrics ({} on error)."""
         try:
-            with output:
+            with _quiet(not self.verbose):
                 engine = BacktestEngine()
                 engine.set_training_data(training_data)
                 engine.set_backtest_data(backtest_data)
@@ -257,7 +276,7 @@ class WalkForwardOptimizer:
                 engine.train_strategies()
                 metrics = engine.run()
         except Exception:
-            logger.exception("Backtest en échec pour %s", params)
+            logger.exception("Backtest failed for %s", params)
             return {}
         return dict(metrics) if metrics else {}
 
@@ -266,6 +285,6 @@ class WalkForwardOptimizer:
             return float("-inf")
         value = metrics.get(self.objective)
         if value is None:
-            raise KeyError(f"Métrique '{self.objective}' absente des résultats ; disponibles : {sorted(metrics)}")
+            raise KeyError(f"Metric '{self.objective}' missing from the results; available: {sorted(metrics)}")
         value = float(value)
         return value if math.isfinite(value) else float("-inf")

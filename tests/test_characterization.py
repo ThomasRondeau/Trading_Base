@@ -10,8 +10,6 @@ deliberately and review the diff:
 
 from __future__ import annotations
 
-import contextlib
-import io
 import json
 import math
 import os
@@ -22,14 +20,14 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from Engines.BacktestEngine import BacktestEngine
-from Strategies.ArimaStrategy import ArimaStrategy
-from Strategies.CascadeStrategy import CascadeStrategy
-from Strategies.MeanReversionStrategy import MeanReversionStrategy
-from Strategies.MLHybridStrategy import MLHybridStrategy
-from Strategies.PairTradingStrategy import PairTradingStrategy
-from Strategies.TradingStrategyInterface import TradingStrategyInterface
-from Strategies.TrendFollowingStrategy import TrendFollowingStrategy
+from quantlab.backtest.engine import BacktestEngine
+from quantlab.strategies.arima import ArimaStrategy
+from quantlab.strategies.base import TradingStrategyInterface
+from quantlab.strategies.cascade import CascadeStrategy
+from quantlab.strategies.mean_reversion import MeanReversionStrategy
+from quantlab.strategies.ml_hybrid import MLHybridStrategy
+from quantlab.strategies.pair_trading import PairTradingStrategy
+from quantlab.strategies.trend_following import TrendFollowingStrategy
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BASELINE_PATH = FIXTURES / "baseline_metrics.json"
@@ -58,9 +56,8 @@ def _run(case: str) -> dict[str, Any]:
     engine.set_training_data(data.iloc[:n_train])
     engine.set_backtest_data(data.iloc[n_train : n_train + n_test])
     engine.add_strategy(factory())
-    with contextlib.redirect_stdout(io.StringIO()):
-        engine.train_strategies()
-        metrics = engine.run()
+    engine.train_strategies()
+    metrics = engine.run()
     return {k: float(v) for k, v in metrics.items()}
 
 
