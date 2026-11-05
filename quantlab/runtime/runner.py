@@ -1,0 +1,114 @@
+"""
+The single trading loop, for backtest and live alike:
+
+    BarFeed -> broker.on_bar (simulator fills) -> router time exits / kill switch
+            -> strategy.on_bar -> router.submit_entry (risk) -> Broker
+
+A backtest is this runner on a `HistoricalBarFeed` with a `SimulatedBroker`; paper / live trading is the
+same runner on an IBKR bar feed with an `IBKRBroker`. Everything runs on the caller's thread: a live
+broker queues its network-thread events and delivers them in `process_events`.
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+import time
+from collections import deque
+from collections.abc import Sequence
+
+import pandas as pd
+
+from quantlab.data.schema import bar_time, bar_value
+from quantlab.execution.broker import Broker
+from quantlab.execution.orders import Fill
+from quantlab.execution.portfolio import Portfolio
+from quantlab.execution.risk import RiskManager
+from quantlab.execution.router import OrderRouter
+from quantlab.runtime.bar_feed import BarFeed
+from quantlab.strategies.base import Strategy
+
+logger = logging.getLogger(__name__)
+
+
+class StrategyRunner:
+    def __init__(
+        self,
+        strategies: Sequence[Strategy],
+        broker: Broker,
+        risk: RiskManager | None = None,
+        capital: float = 100_000.0,
+        tick_size: float = 0.01,
+    ) -> None:
+        ids = [s.strategy_id for s in strategies]
+        if len(set(ids)) != len(ids):
+            raise ValueError(f"Strategy ids must be unique (got {ids}); pass strategy_id=... to tell them apart.")
+        self.strategies = list(strategies)
+        self.broker = broker
+        self.portfolio = Portfolio(capital)
+        self.router = OrderRouter(broker, self.portfolio, risk, tick_size)
+        self.router.fill_listeners.append(self._dispatch_fill)
+        self._by_id = {s.strategy_id: s for s in self.strategies}
+        self._equity_times: list[pd.Timestamp] = []
+        self._equity_values: list[float] = []
+        self.latencies_ms: deque[float] = deque(maxlen=10_000)  # bar received -> orders sent
+        self.last_bar: pd.Series | None = None
+        self._stop_requested = False
+
+    @property
+    def equity(self) -> pd.Series:
+        return pd.Series(self._equity_values, index=pd.DatetimeIndex(self._equity_times), name="equity", dtype=float)
+
+    def run(self, feed: BarFeed) -> None:
+        self._stop_requested = False
+        for strategy in self.strategies:
+            strategy.start()
+        try:
+            for bar in feed:
+                self.broker.process_events()
+                if bar is not None:
+                    self.step(bar)
+                if self._stop_requested:
+                    break
+            self.broker.process_events()
+        finally:
+            for strategy in self.strategies:
+                strategy.stop()
+
+    def stop(self) -> None:
+        """Ask `run` to return after the current bar (thread-safe)."""
+        self._stop_requested = True
+
+    def step(self, bar: pd.Series) -> None:
+        start = time.perf_counter()
+        timestamp = bar_time(bar)
+        self.broker.on_bar(bar)
+        self.broker.process_events()
+        self._mark(bar)
+        self.router.on_bar_close(timestamp)
+        for strategy in self.strategies:
+            for order in strategy.on_bar(bar):
+                self.router.submit_entry(order, strategy.holding_bars)
+        self.latencies_ms.append((time.perf_counter() - start) * 1e3)
+        self._equity_times.append(timestamp)
+        self._equity_values.append(self.portfolio.equity)
+        self.last_bar = bar
+
+    def last_prices(self) -> dict[str, float]:
+        return dict(self.portfolio.last_prices)
+
+    def _mark(self, bar: pd.Series) -> None:
+        prices = {}
+        for symbol in self.portfolio.positions:
+            try:
+                price = bar_value(bar, symbol, "close")
+            except KeyError:
+                continue
+            if math.isfinite(price):
+                prices[symbol] = price
+        self.portfolio.mark(prices)
+
+    def _dispatch_fill(self, fill: Fill) -> None:
+        strategy = self._by_id.get(fill.order.strategy_id)
+        if strategy is not None:
+            strategy.on_fill(fill)

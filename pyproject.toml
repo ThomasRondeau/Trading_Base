@@ -26,7 +26,7 @@ dependencies = [
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "pandas-stubs"]
 
 [tool.setuptools.packages.find]
-include = ["Connections*", "Engines*", "Features*", "Models*", "Strategies*", "Targets*", "Types*"]
+include = ["quantlab*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

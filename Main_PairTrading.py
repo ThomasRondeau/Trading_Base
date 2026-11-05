@@ -2,7 +2,7 @@ import logging
 
 import pandas as pd
 
-from quantlab.backtest.engine import BacktestEngine
+from quantlab.backtest.run import backtest
 from quantlab.data.data_manager import DataManager
 from quantlab.strategies.pair_trading import PairTradingStrategy
 
@@ -23,12 +23,9 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logger.info("Starting pair trading backtest (AAPL vs MSFT)...")
     try:
-        engine = BacktestEngine()
-        engine.set_training_data(prepare_pair_data("AAPL", "MSFT", 50, 5))
-        engine.set_backtest_data(prepare_pair_data("AAPL", "MSFT", 5, 0))
-        engine.add_strategy(PairTradingStrategy())
-        engine.train_strategies()
-        engine.run()
+        backtest(
+            [PairTradingStrategy()], prepare_pair_data("AAPL", "MSFT", 50, 5), prepare_pair_data("AAPL", "MSFT", 5, 0)
+        )
     except Exception:
         logger.exception("Backtest failed")
 

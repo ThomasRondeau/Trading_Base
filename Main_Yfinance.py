@@ -1,6 +1,6 @@
 import logging
 
-from quantlab.backtest.engine import BacktestEngine
+from quantlab.backtest.run import backtest
 from quantlab.data.data_manager import DataManager
 from quantlab.strategies.cascade import CascadeStrategy
 
@@ -11,14 +11,14 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logger.info("Starting cascade backtest (yfinance)...")
     try:
-        engine = BacktestEngine()
         data_manager = DataManager()
-        engine.set_training_data(data_manager.collect_data_yfinance("AAPL", 50, 5))
-        engine.set_backtest_data(data_manager.collect_data_yfinance("AAPL", 5, 0))
-        engine.add_strategy(CascadeStrategy())
-        engine.train_strategies()
-        engine.test_strategies()
-        engine.run()
+        strategy = CascadeStrategy()
+        backtest(
+            [strategy],
+            data_manager.collect_data_yfinance("AAPL", 50, 5),
+            data_manager.collect_data_yfinance("AAPL", 5, 0),
+        )
+        strategy.evaluate()  # in-sample vs cross-validated model scores
     except Exception:
         logger.exception("Backtest failed")
 

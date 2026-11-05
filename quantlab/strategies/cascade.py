@@ -1,140 +1,119 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
+import numpy as np
 import pandas as pd
+import xgboost as xgb
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, r2_score
 
-from quantlab.execution.orders import Order
+from quantlab.execution.orders import Order, Side
+from quantlab.features.base import Feature
 from quantlab.features.composite import AmplitudeFeatures, DirectionFeatures, OpportunityFeatures
-from quantlab.features.feature_id import FeatureID
-from quantlab.features.manager import FeatureManager
-from quantlab.features.technical import ATR, MACD, RSI, SMA, BollingerBands, Volume
-from quantlab.models.cascade_models import AmplitudeModel, DirectionModel, OpportunityModel
-from quantlab.strategies.base import TradingStrategyInterface
-from quantlab.targets.forward import (
-    TargetAmplitude,
-    TargetDirection,
-    TargetOpportunity,
-    TargetPlus1,
-    TargetPlus5,
-    TargetPlus10,
-    TargetPlus20,
-)
-from quantlab.targets.manager import TargetManager
-from quantlab.targets.target_id import TargetID
+from quantlab.features.technical import ATR, MACD, RSI, SMA, BollingerBands, VolumeRatio
+from quantlab.models.sklearn_model import SklearnModel
+from quantlab.strategies.base import Strategy
+from quantlab.targets import ForwardTarget
 
 logger = logging.getLogger(__name__)
 
+HORIZON = 5  # bars ahead predicted by the three models
 
-class CascadeStrategy(TradingStrategyInterface):
+
+class CascadeStrategy(Strategy):
     """
     Three models in cascade: is there an opportunity? -> which direction? -> how large?
     A trade is taken only when the three agree and the predicted amplitude is large enough.
     """
 
-    def __init__(self, min_amplitude_threshold: float = 0.05) -> None:
+    def __init__(self, min_amplitude_threshold: float = 0.05, symbol: str = "AAPL", **kwargs: str) -> None:
         """
-        :param min_amplitude_threshold: minimum predicted amplitude to trade, in percent (same unit as
-                                        TargetAmplitude and TargetOpportunity.threshold_pct).
+        :param min_amplitude_threshold: minimum predicted amplitude to trade, in percent (same unit as the
+                                        `return_pct` and `move` targets).
         """
-        super().__init__()
-        self.is_running = False
-        self.strategy_id = 1
-        self.symbol = "AAPL"
+        super().__init__(symbol=symbol, **kwargs)
         self.min_amplitude_threshold = min_amplitude_threshold
+        self.training_data_shift = 30  # look-ahead safety margin of the training sets (>= HORIZON)
 
-        self.feature_manager = FeatureManager()
-        self.target_manager = TargetManager()
+        atr, rsi, macd, bollinger, volume = ATR(14), RSI(14), MACD(12, 26, 9), BollingerBands(20, 2), VolumeRatio(14)
+        sma_5, sma_20 = SMA(5), SMA(20)
+        self.amplitude_features = AmplitudeFeatures(atr, sma_20, bollinger, rsi, macd, volume)
+        self.direction_features = DirectionFeatures(atr, sma_20, bollinger, rsi, macd, volume)
+        self.opportunity_features = OpportunityFeatures(atr, sma_5, sma_20, bollinger, rsi, macd, volume)
 
-        self.amplitude_model = AmplitudeModel()
-        self.direction_model = DirectionModel()
-        self.opportunity_model = OpportunityModel()
+        self.amplitude_model = SklearnModel(
+            RandomForestRegressor(n_estimators=100, max_depth=5, min_samples_leaf=10, random_state=42, n_jobs=-1),
+            self.amplitude_features.outputs,
+            ForwardTarget(HORIZON, "return_pct"),
+            r2_score,
+        )
+        self.direction_model = SklearnModel(
+            xgb.XGBClassifier(
+                n_estimators=100,
+                max_depth=4,
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=42,
+                n_jobs=-1,
+                eval_metric="logloss",
+            ),
+            self.direction_features.outputs,
+            ForwardTarget(HORIZON, "direction"),
+            accuracy_score,
+        )
+        self.opportunity_model = SklearnModel(
+            RandomForestClassifier(
+                n_estimators=100, max_depth=5, min_samples_leaf=15, random_state=42, n_jobs=-1, class_weight="balanced"
+            ),
+            self.opportunity_features.outputs,
+            ForwardTarget(HORIZON, "move", threshold_pct=0.05),
+            balanced_accuracy_score,
+        )
+        self._datasets: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
-        self.training_data_shift = 30
-        self.current_data = pd.DataFrame()
+    @property
+    def models(self) -> dict[str, SklearnModel]:
+        return {
+            "amplitude": self.amplitude_model,
+            "direction": self.direction_model,
+            "opportunity": self.opportunity_model,
+        }
 
-    def train(self, training_data: pd.DataFrame) -> None:
-        fm = self.feature_manager
-        # Base indicators
-        fm.register_indicator(FeatureID.SMA_5, SMA(window=5))
-        fm.register_indicator(FeatureID.SMA_10, SMA(window=10))
-        fm.register_indicator(FeatureID.SMA_20, SMA(window=20))
-        fm.register_indicator(FeatureID.RSI, RSI(window=14))
-        fm.register_indicator(FeatureID.MACD, MACD(short_window=12, long_window=26, signal_window=9))
-        fm.register_indicator(FeatureID.BOLLINGER_BANDS, BollingerBands(window=20, num_std_dev=2))
-        fm.register_indicator(FeatureID.ATR, ATR(window=14))
-        fm.register_indicator(FeatureID.VOLUME, Volume(window=14))
-        # Composite feature sets
-        fm.register_indicator(FeatureID.AMPLITUDE, AmplitudeFeatures())
-        fm.register_indicator(FeatureID.DIRECTION, DirectionFeatures())
-        fm.register_indicator(FeatureID.OPPORTUNITY, OpportunityFeatures())
-        fm.clear_cache()
+    def features(self) -> Sequence[Feature]:
+        return (self.amplitude_features, self.direction_features, self.opportunity_features)
 
-        tm = self.target_manager
-        tm.register_target(TargetID.SHIFTED_PLUS_1, TargetPlus1())
-        tm.register_target(TargetID.SHIFTED_PLUS_5, TargetPlus5())
-        tm.register_target(TargetID.SHIFTED_PLUS_10, TargetPlus10())
-        tm.register_target(TargetID.SHIFTED_PLUS_20, TargetPlus20())
-        tm.register_target(TargetID.DIRECTION, TargetDirection())
-        tm.register_target(TargetID.OPPORTUNITY, TargetOpportunity())
-        tm.register_target(TargetID.AMPLITUDE, TargetAmplitude())
-        tm.clear_cache()
+    def train(self, history: pd.DataFrame) -> None:
+        features = self.feed.pipeline.compute(history)
+        for name, model in self.models.items():
+            X, y = model.dataset(history, features, drop_last=self.training_data_shift)
+            model.fit(X, y)
+            self._datasets[name] = (X, y)
 
-        # Look-ahead protection: features stop `training_data_shift` bars before the targets' data ends
-        self.current_data = training_data.copy().iloc[: -self.training_data_shift]
-        fm.update(self.current_data)
-        tm.update(training_data, training_data_shift=self.training_data_shift)
+    def evaluate(self, n_splits: int = 5) -> dict[str, dict[str, float]]:
+        """In-sample vs time-ordered cross-validated scores of the three models (overfitting check)."""
+        report: dict[str, dict[str, float]] = {}
+        for name, model in self.models.items():
+            X, y = self._datasets[name]
+            cv_mean, _ = model.cross_validate(X, y, n_splits=n_splits)
+            report[name] = {"in_sample": model.in_sample_score(X, y), "cv": cv_mean}
+            logger.info("%-11s model | in-sample %.2f | CV %.2f", name, report[name]["in_sample"], cv_mean)
+        return report
 
-        for model in (self.amplitude_model, self.direction_model, self.opportunity_model):
-            model.set_feature_manager(fm)
-            model.set_target_manager(tm)
-            model.train()
-
-    def test(self) -> None:
-        amplitude_accuracy = self.amplitude_model.test()
-        direction_accuracy = self.direction_model.test()
-        opportunity_accuracy = self.opportunity_model.test()
-
-        amplitude_cv, _ = self.amplitude_model.cross_validate()
-        direction_cv, _ = self.direction_model.cross_validate()
-        opportunity_cv, _ = self.opportunity_model.cross_validate()
-
-        logger.info("Amplitude model   | train R2: %.2f | CV R2: %.2f", amplitude_accuracy, amplitude_cv)
-        logger.info("Direction model   | train acc: %.2f | CV acc: %.2f", direction_accuracy, direction_cv)
-        logger.info("Opportunity model | train acc: %.2f | CV acc: %.2f", opportunity_accuracy, opportunity_cv)
-        logger.info("A train score close to 1.0 means memorization: rely on the cross-validation (CV) scores.")
-
-    def on_bar(self, bar: pd.Series) -> list[Order]:
-        if not self.is_running:
-            raise RuntimeError("The strategy must be started before receiving bars.")
-
-        # Rolling window keeps the per-bar recomputation bounded
-        self.current_data = pd.concat([self.current_data, bar.to_frame().T]).iloc[-200:]
-        self.feature_manager.update(self.current_data)
-
-        if not self.opportunity_model.predict():
+    def decide(self, bar: pd.Series) -> list[Order]:
+        row = self.feed.row()
+        if self.opportunity_model.predict_row(row) != 1:
             return []
 
-        direction = self.direction_model.predict()  # 'UP' or 'DOWN'
-        amplitude = self.amplitude_model.predict()  # in percent
-
+        direction = "UP" if self.direction_model.predict_row(row) == 1 else "DOWN"
+        amplitude = float(self.amplitude_model.predict_row(row))  # percent
         if abs(amplitude) < self.min_amplitude_threshold:
             return []
-
         # The direction and the sign of the amplitude must agree
         if not ((direction == "UP" and amplitude > 0) or (direction == "DOWN" and amplitude < 0)):
             return []
 
-        side = "BUY" if direction == "UP" else "SELL"
         confidence = min(abs(amplitude) / 5.0, 1.0)  # capped at 5 %
-        quantity = max(1, int(confidence * 10))
-        return [Order(strategy_id=self.strategy_id, symbol=self.symbol, side=side, quantity=quantity)]
-
-    def stop(self) -> None:
-        self.is_running = False
-
-    def update_status(self, is_running: bool) -> None:
-        self.is_running = is_running
-
-    def get_status(self) -> bool:
-        return self.is_running
+        return [self.order(Side.BUY if direction == "UP" else Side.SELL, max(1, int(confidence * 10)))]

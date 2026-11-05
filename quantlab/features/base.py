@@ -1,43 +1,83 @@
-"""Contract every feature implements so `FeatureManager` can resolve and cache it."""
+"""
+Stateless features.
+
+A feature is a pure function of past bars: `compute(data, computed)` returns its output column(s)
+for every row of `data`, using only rows up to each row (causal). It declares:
+
+- `name` / `outputs`: unique column names, derived from the parameters (`sma_20`, `macd_hist_12_26_9`);
+  two instances with the same name must compute the same thing;
+- `inputs()`: the features it reads from `computed` (resolved and computed first by the pipeline);
+- `warmup`: bars of its *own* history needed before its values are exact (the pipeline adds the
+  inputs' warmup). It sizes the live bar buffer: with at least `total warmup` bars of history,
+  the bar-by-bar (live) values equal the values computed on the full history.
+"""
 
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Mapping, Sequence
+from typing import Union
 
 import pandas as pd
 
-from quantlab.features.feature_id import FeatureID
+Computed = Mapping[str, pd.Series]
+Source = Union[str, "Feature"]  # a raw data column or a single-output feature
 
-ResolvedDependencies = dict[FeatureID, "FeatureInterface"]
+# Relative weight below which the forgotten start of an exponential average is considered negligible.
+EWM_TOLERANCE = 1e-10
 
 
-class FeatureInterface(ABC):
-    """
-    A feature declares the other features it needs (`dependencies`) without knowing the manager.
-    The manager feeds data with `update`, resolves dependencies, then calls `calculate`.
-    """
+class Feature(ABC):
+    required_columns: tuple[str, ...] = ()
+    causal: bool = True
 
-    data: pd.DataFrame
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Unique name of the feature (and of its output when it has a single one)."""
 
-    def dependencies(self) -> Iterable[FeatureID]:
-        """Features required to compute this one (none by default)."""
-        return []
+    @property
+    def outputs(self) -> tuple[str, ...]:
+        return (self.name,)
+
+    def inputs(self) -> Sequence[Feature]:
+        return ()
+
+    @property
+    @abstractmethod
+    def warmup(self) -> int:
+        """Own history (in bars) needed for exact values, excluding the inputs' warmup."""
 
     @abstractmethod
-    def calculate(self, resolved_dependencies: ResolvedDependencies | None = None) -> None:
-        """Compute the feature values from `self.data` and the resolved dependencies."""
+    def compute(self, data: pd.DataFrame, computed: Computed) -> pd.Series | pd.DataFrame:
+        """Values for every row of `data`; a DataFrame must have exactly `outputs` as columns."""
 
-    @abstractmethod
-    def update(self, new_data: pd.DataFrame) -> None:
-        """Replace the input data."""
-
-    @abstractmethod
-    def clear_cache(self) -> None:
-        """Reset every computed value (and the input data)."""
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({self.name})"
 
 
-def require_columns(data: pd.DataFrame, columns: Iterable[str], owner: str) -> None:
-    missing = [c for c in columns if c not in data]
-    if missing:
-        raise ValueError(f"{owner}: missing columns {missing} in the data.")
+def source_name(source: Source) -> str:
+    return source if isinstance(source, str) else source.name
+
+
+def source_inputs(*sources: Source) -> tuple[Feature, ...]:
+    return tuple(s for s in sources if isinstance(s, Feature))
+
+
+def source_columns(*sources: Source) -> tuple[str, ...]:
+    return tuple(s for s in sources if isinstance(s, str))
+
+
+def source_series(source: Source, data: pd.DataFrame, computed: Computed) -> pd.Series:
+    if isinstance(source, str):
+        return data[source]
+    if len(source.outputs) != 1:
+        raise ValueError(f"{source} has several outputs and cannot be used as a single source.")
+    return computed[source.name]
+
+
+def ewm_warmup(span: int, tolerance: float = EWM_TOLERANCE) -> int:
+    """Bars after which the weight of the forgotten history of an EWM(span) falls below `tolerance`."""
+    alpha = 2 / (span + 1)
+    return math.ceil(math.log(tolerance) / math.log(1 - alpha))

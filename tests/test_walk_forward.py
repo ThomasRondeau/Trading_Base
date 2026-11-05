@@ -1,49 +1,33 @@
 import math
-from typing import Any
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from quantlab.backtest.walk_forward import WalkForwardOptimizer, expand_grid, make_folds
-from quantlab.execution.orders import Order
-from quantlab.strategies.base import TradingStrategyInterface
+from quantlab.execution.orders import Order, Side
+from quantlab.strategies.base import Strategy
 
 
-class EveryNBarsStrategy(TradingStrategyInterface):
+class EveryNBarsStrategy(Strategy):
     """Dummy strategy: buys every `period` bars."""
 
     instances = 0
 
     def __init__(self, period: int = 10) -> None:
-        super().__init__()
+        super().__init__(symbol="TEST")
         self.period = period
         self.trained = False
-        self.is_running = False
         self._bar = 0
         EveryNBarsStrategy.instances += 1
 
-    def train(self, training_data: Any) -> None:
+    def train(self, history: pd.DataFrame) -> None:
         assert not self.trained, "an instance must be trained only once"
         self.trained = True
 
-    def test(self) -> None:
-        pass
-
-    def update_status(self, is_running: bool) -> None:
-        self.is_running = is_running
-
-    def on_bar(self, bar: pd.Series) -> list[Order]:
+    def decide(self, bar: pd.Series) -> list[Order]:
         self._bar += 1
-        if self._bar % self.period == 0:
-            return [Order(strategy_id=0, symbol="TEST", side="BUY", quantity=1)]
-        return []
-
-    def stop(self) -> None:
-        self.is_running = False
-
-    def get_status(self) -> bool:
-        return self.is_running
+        return [self.order(Side.BUY, 1)] if self._bar % self.period == 0 else []
 
 
 def make_data(n: int) -> pd.DataFrame:
@@ -92,7 +76,7 @@ def test_optimizer_selects_best_params_and_uses_fresh_instances() -> None:
         validation_size=60,
         test_size=60,
         embargo=5,
-        objective="total_pnl_net_percent",
+        objective="total_return_pct",
     )
     result = optimizer.run(make_data(400))
 

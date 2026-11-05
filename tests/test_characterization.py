@@ -2,6 +2,8 @@
 Characterization tests: freeze the current backtest metrics of every strategy on fixed data.
 
 They guard the refactoring steps: a pure restructuring must reproduce these numbers exactly.
+Every case runs twice, with the features precomputed (backtest batch mode) and bar by bar (the live
+path): both must match the same baseline, which is the strategy-level parity test.
 When a change is *meant* to alter results (bug fix, engine change), regenerate the baseline
 deliberately and review the diff:
 
@@ -20,9 +22,9 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from quantlab.backtest.engine import BacktestEngine
+from quantlab.backtest.run import backtest
 from quantlab.strategies.arima import ArimaStrategy
-from quantlab.strategies.base import TradingStrategyInterface
+from quantlab.strategies.base import Strategy
 from quantlab.strategies.cascade import CascadeStrategy
 from quantlab.strategies.mean_reversion import MeanReversionStrategy
 from quantlab.strategies.ml_hybrid import MLHybridStrategy
@@ -39,7 +41,7 @@ def _load(name: str) -> pd.DataFrame:
 
 
 # name -> (fixture, factory, train_bars, backtest_bars)
-CASES: dict[str, tuple[str, Callable[[], TradingStrategyInterface], int, int]] = {
+CASES: dict[str, tuple[str, Callable[[], Strategy], int, int]] = {
     "trend_following": ("aapl_1m.parquet", TrendFollowingStrategy, 4000, 1000),
     "mean_reversion": ("aapl_1m.parquet", MeanReversionStrategy, 4000, 1000),
     "ml_hybrid": ("aapl_1m.parquet", MLHybridStrategy, 4000, 1000),
@@ -49,16 +51,13 @@ CASES: dict[str, tuple[str, Callable[[], TradingStrategyInterface], int, int]] =
 }
 
 
-def _run(case: str) -> dict[str, Any]:
+def _run(case: str, precompute: bool) -> dict[str, Any]:
     fixture, factory, n_train, n_test = CASES[case]
     data = _load(fixture)
-    engine = BacktestEngine()
-    engine.set_training_data(data.iloc[:n_train])
-    engine.set_backtest_data(data.iloc[n_train : n_train + n_test])
-    engine.add_strategy(factory())
-    engine.train_strategies()
-    metrics = engine.run()
-    return {k: float(v) for k, v in metrics.items()}
+    result = backtest(
+        [factory()], data.iloc[:n_train], data.iloc[n_train : n_train + n_test], precompute_features=precompute
+    )
+    return {k: float(v) for k, v in result.metrics.items()}
 
 
 def _read_baseline() -> dict[str, dict[str, float]]:
@@ -69,12 +68,15 @@ def _read_baseline() -> dict[str, dict[str, float]]:
 
 
 @pytest.mark.slow
+@pytest.mark.parametrize("mode", ["batch", "bar_by_bar"])
 @pytest.mark.parametrize("case", list(CASES))
-def test_metrics_match_baseline(case: str) -> None:
-    metrics = _run(case)
+def test_metrics_match_baseline(case: str, mode: str) -> None:
+    metrics = _run(case, precompute=mode == "batch")
     baseline = _read_baseline()
 
     if UPDATE:
+        if mode != "batch":
+            pytest.skip("the baseline is written from the batch run; the bar-by-bar run must then match it")
         baseline[case] = metrics
         BASELINE_PATH.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n")
         return
@@ -87,4 +89,4 @@ def test_metrics_match_baseline(case: str) -> None:
         if math.isnan(value):
             assert math.isnan(actual), key
         else:
-            assert actual == pytest.approx(value, rel=1e-9, abs=1e-12), key
+            assert actual == pytest.approx(value, rel=1e-9, abs=1e-12), (key, mode)

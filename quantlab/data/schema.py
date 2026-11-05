@@ -46,3 +46,14 @@ def validate_ohlcv(df: pd.DataFrame, *, datetime_column: str | None = None) -> p
 
     out = out[~out.index.duplicated(keep="first")].sort_index()
     return out.dropna(subset=["close"])
+
+
+def bar_value(bar: pd.Series, symbol: str, field: str = "close") -> float:
+    """`field` of `symbol` in a bar: multi-symbol bars carry `<field>_<SYMBOL>`, single-symbol bars `<field>`."""
+    key = f"{field}_{symbol}"
+    return float(bar[key] if key in bar.index else bar[field])
+
+
+def bar_time(bar: pd.Series) -> pd.Timestamp:
+    """Timestamp of a bar Series (its name, as yielded by `DataFrame.iterrows` and the live feeds)."""
+    return pd.Timestamp(bar.name)  # type: ignore[arg-type]

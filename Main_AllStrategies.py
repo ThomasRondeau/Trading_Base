@@ -1,11 +1,9 @@
 import logging
 
-import pandas as pd
-
-from quantlab.backtest.engine import BacktestEngine
+from quantlab.backtest.run import backtest
 from quantlab.data.massive import MassiveAPIClient
 from quantlab.strategies.arima import ArimaStrategy
-from quantlab.strategies.base import TradingStrategyInterface
+from quantlab.strategies.base import Strategy
 from quantlab.strategies.cascade import CascadeStrategy
 from quantlab.strategies.mean_reversion import MeanReversionStrategy
 from quantlab.strategies.ml_hybrid import MLHybridStrategy
@@ -17,27 +15,14 @@ SYMBOL = "SPY"  # S&P 500 ETF: deep intraday liquidity
 IN_SAMPLE_FRACTION = 0.83  # ~5 months in-sample, ~1 month out-of-sample
 
 
-def all_strategies() -> list[TradingStrategyInterface]:
-    strategies: list[TradingStrategyInterface] = [
-        CascadeStrategy(),
-        ArimaStrategy(),
-        MeanReversionStrategy(),
-        MLHybridStrategy(),
-        TrendFollowingStrategy(),
+def all_strategies() -> list[Strategy]:
+    return [
+        CascadeStrategy(symbol=SYMBOL),
+        ArimaStrategy(symbol=SYMBOL),
+        MeanReversionStrategy(symbol=SYMBOL),
+        MLHybridStrategy(symbol=SYMBOL),
+        TrendFollowingStrategy(symbol=SYMBOL),
     ]
-    for strategy in strategies:
-        strategy.symbol = SYMBOL  # type: ignore[attr-defined]
-    return strategies
-
-
-def run_backtest(strategies: list[TradingStrategyInterface], train: pd.DataFrame, test: pd.DataFrame) -> None:
-    engine = BacktestEngine()
-    engine.set_training_data(train)
-    engine.set_backtest_data(test)
-    for strategy in strategies:
-        engine.add_strategy(strategy)
-    engine.train_strategies()
-    engine.run()
 
 
 def main() -> None:
@@ -55,10 +40,10 @@ def main() -> None:
 
         for strategy in all_strategies():
             logger.info("=== Strategy: %s ===", type(strategy).__name__)
-            run_backtest([strategy], train, test)
+            backtest([strategy], train, test)
 
         logger.info("=== Portfolio: all strategies ===")
-        run_backtest(all_strategies(), train, test)
+        backtest(all_strategies(), train, test)
     except Exception:
         logger.exception("Run failed")
 

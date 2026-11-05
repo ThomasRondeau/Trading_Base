@@ -11,7 +11,7 @@ import yfinance as yf
 
 from quantlab.data.massive import MassiveAPIClient
 from quantlab.data.schema import validate_ohlcv
-from quantlab.execution.ibkr.trading_app import TradingApp
+from quantlab.execution.ibkr.client import IBKRClient, stock
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +43,15 @@ class DataManager:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         data.to_csv(self._get_cache_path(symbol))  # index kept: it holds the timestamps
 
-    def collect_training_data(self, symbol: str, days_back: int, until: int = 0) -> pd.DataFrame:
-        """1-minute IBKR bars, one request per missing day; requires a connected TradingApp."""
+    def collect_data_ibkr(self, client: IBKRClient, symbol: str, days_back: int, until: int = 0) -> pd.DataFrame:
+        """1-minute regular-hours IBKR bars, one request per missing day; `client` must be connected."""
         logger.info("Collecting IBKR data for %s over %d days...", symbol, days_back)
 
         cached_data = self._load_cache(symbol)
         # Cache hits are checked per calendar date
         cached_dates = set(cached_data.index.date.tolist()) if not cached_data.empty else set()
 
-        trading_app = TradingApp.get_instance()
-        contract = TradingApp.get_contract(symbol)
+        contract = stock(symbol)
         all_data = [cached_data] if not cached_data.empty else []
         new_data_fetched = False
 
@@ -65,7 +64,7 @@ class DataManager:
                     continue
 
                 date_str = target_date.strftime("%Y%m%d 20:00:00 US/Eastern")
-                daily_data = trading_app.get_historical_data(99, contract, end_date=date_str)
+                daily_data = client.historical_bars(contract, end=date_str, duration="1 D", use_rth=True)
 
                 if not daily_data.empty:
                     all_data.append(daily_data)

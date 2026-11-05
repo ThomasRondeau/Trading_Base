@@ -1,29 +1,86 @@
-"""Risk limits. Only `stop_loss_pct` and `take_profit_pct` are used by the backtest engine so far."""
+"""
+Pre-trade risk checks and the kill switch, applied by the `OrderRouter` to every entry order.
+
+Exits (time exits, protective stops / targets, flattening) are never blocked.
+"""
 
 from __future__ import annotations
 
-from typing import Any
+import dataclasses
+import logging
+from dataclasses import dataclass
+
+import pandas as pd
+
+from quantlab.execution.orders import Order
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RiskLimits:
+    #: protective stop / target placed at the broker after each entry fill (fraction of the fill price)
+    stop_loss_pct: float | None = 0.02
+    take_profit_pct: float | None = 0.05
+    #: entry orders are clipped to this quantity
+    max_order_quantity: int | None = None
+    #: absolute net position per symbol (including pending entries) that entries may not exceed
+    max_position_quantity: int | None = None
+    #: kill switch: halt when equity falls this fraction below the day's starting equity
+    max_daily_loss_pct: float | None = None
+    #: on halt, close every open position
+    flatten_on_halt: bool = True
 
 
 class RiskManager:
-    def __init__(
-        self,
-        initial_capital: float = 100000,
-        max_position_size_pct: float = 0.1,  # 10% of capital per position
-        max_risk_per_trade_pct: float = 0.02,  # 2% of capital at risk per trade
-        max_total_exposure_pct: float = 1.0,  # 100% of capital in total
-        stop_loss_pct: float = 0.02,  # 2% stop loss
-        take_profit_pct: float = 0.05,  # 5% take profit
-    ) -> None:
-        self.initial_capital = initial_capital
-        self.current_capital = initial_capital
-        self.max_position_size_pct = max_position_size_pct
-        self.max_risk_per_trade_pct = max_risk_per_trade_pct
-        self.max_total_exposure_pct = max_total_exposure_pct
-        self.stop_loss_pct = stop_loss_pct
-        self.take_profit_pct = take_profit_pct
+    def __init__(self, limits: RiskLimits | None = None) -> None:
+        self.limits = limits or RiskLimits()
+        self.halted = False
+        self.halt_reason = ""
+        self._day: object = None
+        self._day_start_equity = 0.0
 
-        # Tracking
-        self.positions: dict[str, dict[str, Any]] = {}  # {symbol: {quantity, entry_price, stop_price}}
-        self.trades_history: list[dict[str, Any]] = []
-        self.pnl: float = 0
+    def halt(self, reason: str) -> None:
+        if not self.halted:
+            logger.error("Kill switch: trading halted (%s)", reason)
+        self.halted, self.halt_reason = True, reason
+
+    def resume(self) -> None:
+        logger.warning("Trading resumed (was halted: %s)", self.halt_reason)
+        self.halted, self.halt_reason = False, ""
+
+    def check_entry(self, order: Order, exposure: int) -> Order | None:
+        """
+        The order to send (possibly with a reduced quantity), or None if it is refused.
+        :param exposure: current net position plus pending entries of the order's symbol (signed).
+        """
+        if self.halted:
+            logger.warning("Order refused (halted: %s): %s", self.halt_reason, order)
+            return None
+        quantity = order.quantity
+        if self.limits.max_order_quantity is not None:
+            quantity = min(quantity, self.limits.max_order_quantity)
+        if self.limits.max_position_quantity is not None:
+            room = self.limits.max_position_quantity - exposure * order.side.sign
+            quantity = min(quantity, max(room, 0))
+        if quantity <= 0:
+            logger.info("Order refused by position limit (exposure %d): %s", exposure, order)
+            return None
+        if quantity != order.quantity:
+            logger.info("Order quantity clipped %d -> %d: %s", order.quantity, quantity, order)
+            return dataclasses.replace(order, quantity=quantity)
+        return order
+
+    def on_equity(self, timestamp: pd.Timestamp, equity: float) -> bool:
+        """Track the daily loss; returns True when this update triggers the kill switch."""
+        day = timestamp.date()
+        if day != self._day:
+            self._day, self._day_start_equity = day, equity
+        limit = self.limits.max_daily_loss_pct
+        if self.halted or limit is None or self._day_start_equity <= 0:
+            return False
+        loss = 1 - equity / self._day_start_equity
+        if loss >= limit:
+            self.halt(f"daily loss {loss:.2%} >= {limit:.2%}")
+            return True
+        return False

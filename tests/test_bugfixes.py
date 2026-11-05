@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar
@@ -14,18 +13,18 @@ import pytest
 import quantlab.data.data_manager as data_manager_module
 import quantlab.data.massive as massive_module
 import quantlab.models.arima as arima_module
-import quantlab.models.base as model_base_module
+import quantlab.models.sklearn_model as sklearn_model_module
 from quantlab.data.data_manager import DataManager
 from quantlab.data.massive import MassiveAPIClient
 from quantlab.data.schema import validate_ohlcv
-from quantlab.features.feature_id import FeatureID
+from quantlab.execution.orders import Side
 from quantlab.features.technical import ADX, MACD, VWAP
 from quantlab.strategies.arima import ArimaStrategy
 from quantlab.strategies.cascade import CascadeStrategy
 from quantlab.strategies.ml_hybrid import MLHybridStrategy
 from quantlab.strategies.pair_trading import PairTradingStrategy
 from quantlab.strategies.trend_following import TrendFollowingStrategy
-from quantlab.targets.forward import TargetOpportunity
+from quantlab.targets import ForwardTarget
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -155,12 +154,9 @@ def test_macd_rejects_inverted_windows() -> None:
         MACD(short_window=26, long_window=12)
 
 
-@pytest.mark.parametrize("factory", [MLHybridStrategy, CascadeStrategy])
-def test_strategies_register_macd_12_26(factory: Any, aapl: pd.DataFrame) -> None:
-    strategy = factory()
-    strategy.train(aapl.iloc[:600])
-    macd = strategy.feature_manager._indicators[FeatureID.MACD]
-    assert (macd.short_window, macd.long_window) == (12, 26)
+def test_strategies_use_macd_12_26() -> None:
+    for macd in (CascadeStrategy().amplitude_features.macd, MLHybridStrategy().direction_features.macd):
+        assert (macd.short_window, macd.long_window) == (12, 26)
 
 
 # --- A2: ADX alignment -------------------------------------------------------------------------------------
@@ -168,12 +164,10 @@ def test_strategies_register_macd_12_26(factory: Any, aapl: pd.DataFrame) -> Non
 
 def test_adx_keeps_data_index() -> None:
     data = ohlcv(100)
-    adx = ADX(window=14)
-    adx.update(data)
-    adx.calculate({})
-    assert adx.adx.index.equals(data.index)
-    assert adx.adx.notna().sum() > 0
-    assert adx.adx.dropna().between(0, 100).all()
+    adx = ADX(window=14).compute(data, {})
+    assert adx.index.equals(data.index)
+    assert adx.notna().sum() > 0
+    assert adx.dropna().between(0, 100).all()
 
 
 # --- A9: VWAP resets per session ---------------------------------------------------------------------------
@@ -183,13 +177,12 @@ def test_vwap_resets_each_session() -> None:
     day1 = ohlcv(30, start="2026-01-05 14:30")
     day2 = ohlcv(30, start="2026-01-06 14:30")
     data = pd.concat([day1, day2])
-    vwap = VWAP(data)
-    vwap.calculate()
+    vwap = VWAP().compute(data, {})
 
     typical = (data["close"] + data["high"] + data["low"]) / 3
     first_bar_day2 = day2.index[0]
-    assert vwap.point_of_control[first_bar_day2] == pytest.approx(typical[first_bar_day2])
-    assert vwap.superior_limit[first_bar_day2] == pytest.approx(typical[first_bar_day2])  # zero dispersion
+    assert vwap.loc[first_bar_day2, "vwap"] == pytest.approx(typical[first_bar_day2])
+    assert vwap.loc[first_bar_day2, "vwap_upper_3"] == pytest.approx(typical[first_bar_day2])  # zero dispersion
 
 
 # --- A3: ARIMA ---------------------------------------------------------------------------------------------
@@ -215,8 +208,8 @@ def _arima_orders(monkeypatch: pytest.MonkeyPatch, delta: float, aapl: pd.DataFr
     FakeArima.forecast_delta = delta
     monkeypatch.setattr(arima_module, "ARIMA", FakeArima)
     strategy = ArimaStrategy(order=(3, 1, 1))
-    strategy.train(aapl.iloc[:200])
-    strategy.update_status(True)
+    strategy.fit(aapl.iloc[:200])
+    strategy.start()
     orders = [o for _, bar in aapl.iloc[200:210].iterrows() for o in strategy.on_bar(bar)]
     assert set(FakeArima.orders) == {(3, 1, 1)}  # order used to be ignored
     return orders
@@ -229,7 +222,7 @@ def test_arima_does_not_trade_without_edge(monkeypatch: pytest.MonkeyPatch, aapl
 def test_arima_trades_when_edge_exceeds_costs(monkeypatch: pytest.MonkeyPatch, aapl: pd.DataFrame) -> None:
     orders = _arima_orders(monkeypatch, delta=1.0, aapl=aapl)
     assert len(orders) == 10
-    assert {o.side for o in orders} == {"BUY"}
+    assert {o.side for o in orders} == {Side.BUY}
 
 
 # --- A7: cross-validation uses the configured estimator ----------------------------------------------------
@@ -237,16 +230,17 @@ def test_arima_trades_when_edge_exceeds_costs(monkeypatch: pytest.MonkeyPatch, a
 
 def test_cross_validate_clones_configured_model(monkeypatch: pytest.MonkeyPatch, aapl: pd.DataFrame) -> None:
     depths: list[int] = []
-    real_clone = model_base_module.clone
+    real_clone = sklearn_model_module.clone
 
     def spy_clone(estimator: Any) -> Any:
         depths.append(estimator.get_params()["max_depth"])
         return real_clone(estimator)
 
-    monkeypatch.setattr(model_base_module, "clone", spy_clone)
+    monkeypatch.setattr(sklearn_model_module, "clone", spy_clone)
     strategy = MLHybridStrategy(max_depth=7)
-    strategy.train(aapl.iloc[:600])
-    strategy.direction_model.cross_validate(n_splits=2)
+    strategy.fit(aapl.iloc[:600])
+    assert strategy._dataset is not None
+    strategy.direction_model.cross_validate(*strategy._dataset, n_splits=2)
     assert depths == [7, 7]  # used to be a hard-coded max_depth=4
 
 
@@ -255,48 +249,37 @@ def test_cross_validate_clones_configured_model(monkeypatch: pytest.MonkeyPatch,
 
 def test_opportunity_threshold_is_used() -> None:
     data = pd.DataFrame({"close": [100.0, 100.0, 100.0, 100.1, 100.0, 100.0, 100.0]})
-    loose, strict = TargetOpportunity(threshold_pct=0.05, horizon=3), TargetOpportunity(threshold_pct=0.5, horizon=3)
-    for target in (loose, strict):
-        target.update(data, training_data_shift=0)
-        target.calculate()
-    assert loose.target.iloc[0] == 1  # +0.1 % move > 0.05 %
-    assert strict.target.iloc[0] == 0  # +0.1 % move < 0.5 %
+    assert ForwardTarget(3, "move", threshold_pct=0.05).compute(data).iloc[0] == 1  # +0.1 % > 0.05 %
+    assert ForwardTarget(3, "move", threshold_pct=0.5).compute(data).iloc[0] == 0  # +0.1 % < 0.5 %
 
 
-# --- A10: trend-following feature IDs ----------------------------------------------------------------------
+# --- A10: trend-following feature names --------------------------------------------------------------------
 
 
-def test_trend_following_ids_match_windows(aapl: pd.DataFrame) -> None:
+def test_trend_following_features_match_windows() -> None:
     strategy = TrendFollowingStrategy(sma_fast=10, sma_slow=50)
-    strategy.train(aapl.iloc[:300])
-    indicators = strategy.feature_manager._indicators
-    assert indicators[FeatureID.SMA_FAST].window == 10
-    assert indicators[FeatureID.SMA_SLOW].window == 50
-    assert FeatureID.SMA_5 not in indicators
+    assert [f.name for f in strategy.features()] == ["sma_10", "sma_50"]
 
 
-# --- A11: bounded pair-trading history ---------------------------------------------------------------------
+# --- A11: bounded history ----------------------------------------------------------------------------------
 
 
 def test_pair_trading_history_is_bounded() -> None:
     pair = pd.read_parquet(FIXTURES / "aapl_msft_2m.parquet")
     strategy = PairTradingStrategy()
-    strategy.train(pair.iloc[:200])
-    strategy.update_status(True)
+    strategy.fit(pair.iloc[:200])
+    strategy.start()
     for _, bar in pair.iloc[200:600].iterrows():
         strategy.on_bar(bar)
-    assert len(strategy.current_data) <= strategy.max_history
+    assert strategy.feed.buffer is not None
+    assert len(strategy.feed.buffer) == strategy.feed.capacity < 200
 
 
-# --- A12: TradingApp singleton -----------------------------------------------------------------------------
+# --- A12: the IBKR client is no longer a crashing singleton -------------------------------------------------
 
 
-def test_no_direct_trading_app_construction() -> None:
-    offenders = [
-        str(path.relative_to(ROOT))
-        for path in ROOT.rglob("*.py")
-        if "tests" not in path.parts
-        and ".git" not in path.parts
-        and re.search(r"\bTradingApp\(\)", path.read_text(encoding="utf-8"))
-    ]
-    assert offenders == []
+def test_ibkr_clients_can_coexist() -> None:
+    from quantlab.execution.ibkr.client import IBKRClient
+
+    first, second = IBKRClient(), IBKRClient()
+    assert first is not second

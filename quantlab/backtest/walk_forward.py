@@ -11,7 +11,7 @@ For each fold:
   3. it is scored once on `test`, which was never used to choose the parameters.
 
 The concatenated `test` scores are the out-of-sample estimate. The embargo drops bars between
-blocks so that targets built from future prices (forward targets, training_data_shift) cannot
+blocks so that targets built from future prices (forward targets, the training sets' drop_last) cannot
 leak into the next block.
 """
 
@@ -27,13 +27,13 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.backtest.engine import BacktestEngine
-from quantlab.strategies.base import TradingStrategyInterface
+from quantlab.backtest.run import backtest
+from quantlab.strategies.base import Strategy
 
 logger = logging.getLogger(__name__)
 
 Params = dict[str, Any]
-StrategyFactory = Callable[..., TradingStrategyInterface]
+StrategyFactory = Callable[..., Strategy]
 Metrics = dict[str, Any]
 
 
@@ -154,7 +154,8 @@ def _quiet(enabled: bool) -> Iterator[None]:
     if not enabled:
         yield
         return
-    noisy = [logging.getLogger(name) for name in ("quantlab.backtest.engine", "quantlab.strategies")]
+    names = ("quantlab.backtest.run", "quantlab.strategies", "quantlab.execution", "quantlab.runtime")
+    noisy = [logging.getLogger(name) for name in names]
     previous = [lg.level for lg in noisy]
     for lg in noisy:
         lg.setLevel(logging.WARNING)
@@ -179,7 +180,7 @@ class WalkForwardOptimizer:
         print(result.summary())
 
     `strategy_factory(**params)` must return a *fresh* instance on every call: strategies register
-    their features in `train()` and cannot be retrained.
+    their models and feature buffer in `fit()` and are not meant to be refitted.
     """
 
     def __init__(
@@ -189,7 +190,7 @@ class WalkForwardOptimizer:
         train_size: int,
         validation_size: int,
         test_size: int,
-        objective: str = "total_pnl_net_percent",
+        objective: str = "total_return_pct",
         step: int | None = None,
         embargo: int = 0,
         anchored: bool = False,
@@ -269,12 +270,7 @@ class WalkForwardOptimizer:
         """Train a fresh strategy on `training_data` and return the backtest metrics ({} on error)."""
         try:
             with _quiet(not self.verbose):
-                engine = BacktestEngine()
-                engine.set_training_data(training_data)
-                engine.set_backtest_data(backtest_data)
-                engine.add_strategy(self.strategy_factory(**params))
-                engine.train_strategies()
-                metrics = engine.run()
+                metrics = backtest([self.strategy_factory(**params)], training_data, backtest_data).metrics
         except Exception:
             logger.exception("Backtest failed for %s", params)
             return {}

@@ -1,14 +1,81 @@
-"""Order emitted by a strategy."""
+"""Orders emitted by strategies (and by the router), and the fills / status updates reported by a broker."""
 
 from __future__ import annotations
 
+import uuid
+from dataclasses import dataclass, field
+from enum import Enum
 
+import pandas as pd
+
+
+class Side(str, Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+
+    @property
+    def sign(self) -> int:
+        return 1 if self is Side.BUY else -1
+
+    @property
+    def opposite(self) -> Side:
+        return Side.SELL if self is Side.BUY else Side.BUY
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class OrderType(str, Enum):
+    MARKET = "MKT"
+    LIMIT = "LMT"
+    STOP = "STP"
+
+
+class OrderStatus(str, Enum):
+    CANCELLED = "Cancelled"
+    REJECTED = "Rejected"
+
+
+def _new_order_id() -> str:
+    # Unique across sessions: order ids end up in the journal and in the persisted live state.
+    return uuid.uuid4().hex[:16]
+
+
+@dataclass(frozen=True)
 class Order:
-    def __init__(self, strategy_id: int, symbol: str, side: str, quantity: int) -> None:
-        self.strategy_id = strategy_id
-        self.symbol = symbol
-        self.side = side  # 'BUY' or 'SELL'
-        self.quantity = quantity
+    symbol: str
+    side: Side
+    quantity: int
+    strategy_id: str
+    order_type: OrderType = OrderType.MARKET
+    limit_price: float | None = None
+    stop_price: float | None = None
+    #: orders sharing an OCA ("one cancels all") group: the first fill cancels the others
+    oca_group: str | None = None
+    order_id: str = field(default_factory=_new_order_id)
 
-    def __repr__(self) -> str:
-        return f"Order(strategy_id={self.strategy_id}, symbol={self.symbol!r}, side={self.side!r}, qty={self.quantity})"
+    def __post_init__(self) -> None:
+        if self.quantity <= 0:
+            raise ValueError(f"Order quantity must be > 0 (got {self.quantity}).")
+        object.__setattr__(self, "side", Side(self.side))
+        object.__setattr__(self, "order_type", OrderType(self.order_type))
+        if self.order_type is OrderType.LIMIT and self.limit_price is None:
+            raise ValueError("A limit order needs a limit_price.")
+        if self.order_type is OrderType.STOP and self.stop_price is None:
+            raise ValueError("A stop order needs a stop_price.")
+
+
+@dataclass(frozen=True)
+class Fill:
+    """A (possibly partial) execution of `order`: `quantity` shares at `price`, `fees` in cash."""
+
+    order: Order
+    price: float
+    quantity: int
+    timestamp: pd.Timestamp
+    fees: float = 0.0
+    exec_id: str | None = None
+
+    @property
+    def signed_quantity(self) -> int:
+        return self.order.side.sign * self.quantity
