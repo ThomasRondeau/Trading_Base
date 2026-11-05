@@ -1,0 +1,62 @@
+{
+  "arima": {
+    "avg_pnl_net_percent": -0.020556814096855672,
+    "max_drawdown": 0.0,
+    "sharpe_ratio": 0.0,
+    "total_fees": 55.23554130000001,
+    "total_pnl_gross_percent": -0.11140810880011309,
+    "total_pnl_net_percent": -4.111362819371134,
+    "total_trades": 200.0,
+    "win_rate": 36.5
+  },
+  "cascade": {
+    "avg_pnl_net_percent": 0.04123879307156883,
+    "max_drawdown": 0.0,
+    "sharpe_ratio": 93.64253382229396,
+    "total_fees": 1.44567926,
+    "total_pnl_gross_percent": 1.592400507958387,
+    "total_pnl_net_percent": 1.0722086198607896,
+    "total_trades": 26.0,
+    "win_rate": 61.53846153846154
+  },
+  "mean_reversion": {
+    "avg_pnl_net_percent": -0.06868308717858669,
+    "max_drawdown": -2.003550029609352,
+    "sharpe_ratio": -6.31260261838906,
+    "total_fees": 11.6426419,
+    "total_pnl_gross_percent": -1.0220583429977756,
+    "total_pnl_net_percent": -1.4423448307503206,
+    "total_trades": 21.0,
+    "win_rate": 52.38095238095239
+  },
+  "ml_hybrid": {
+    "avg_pnl_net_percent": -0.10712257668365002,
+    "max_drawdown": -4.208333946481616,
+    "sharpe_ratio": -8.128604599740394,
+    "total_fees": 18.2881297,
+    "total_pnl_gross_percent": -2.8745702819328818,
+    "total_pnl_net_percent": -3.535045030560451,
+    "total_trades": 33.0,
+    "win_rate": 48.484848484848484
+  },
+  "pair_trading": {
+    "avg_pnl_net_percent": 0.07264123024185298,
+    "max_drawdown": 0.0,
+    "sharpe_ratio": 13.976617160081144,
+    "total_fees": 50.2503032836914,
+    "total_pnl_gross_percent": 5.374113678938949,
+    "total_pnl_net_percent": 4.213191354027473,
+    "total_trades": 58.0,
+    "win_rate": 44.827586206896555
+  },
+  "trend_following": {
+    "avg_pnl_net_percent": -0.030021545883242504,
+    "max_drawdown": -1.5412502857178778,
+    "sharpe_ratio": -26.346025837873597,
+    "total_fees": 39.8560095,
+    "total_pnl_gross_percent": -0.72153853477448,
+    "total_pnl_net_percent": -2.1615513035934604,
+    "total_trades": 72.0,
+    "win_rate": 22.22222222222222
+  }
+}

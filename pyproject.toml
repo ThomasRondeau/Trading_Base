@@ -19,10 +19,11 @@ dependencies = [
     "requests>=2.31",
     "ibapi>=10.30",
     "python-dotenv>=1.0",
+    "pyarrow>=17",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "pandas-stubs"]
 
 [tool.setuptools.packages.find]
 include = ["Connections*", "Engines*", "Features*", "Models*", "Strategies*", "Targets*", "Types*"]
@@ -30,3 +31,16 @@ include = ["Connections*", "Engines*", "Features*", "Models*", "Strategies*", "T
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["slow: end-to-end backtests on fixtures (deselect with -m 'not slow')"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true

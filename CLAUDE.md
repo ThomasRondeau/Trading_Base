@@ -10,7 +10,10 @@ Modular Python quant-trading research system: technical-indicator features → M
 
 Python 3.10 (on this machine `python` is 3.8 — use `py -3.10`). Dependencies are declared in `pyproject.toml`: `py -3.10 -m pip install -e .[dev]`.
 
-- Tests: `py -3.10 -m pytest` (single test: `py -3.10 -m pytest tests/test_walk_forward.py::test_expand_grid`). `pythonpath = ["."]` is set in `pyproject.toml`, so run from the repo root.
+- Tests: `py -3.10 -m pytest` (single test: `py -3.10 -m pytest tests/test_walk_forward.py::test_expand_grid`; skip the ~80 s end-to-end backtests with `-m "not slow"`). `pythonpath = ["."]` is set in `pyproject.toml`, so run from the repo root.
+- Characterization baseline: `tests/test_characterization.py` backtests every strategy on frozen parquet fixtures (`tests/fixtures/`) and compares to `baseline_metrics.json`. A pure refactor must keep it green. Only regenerate (`UPDATE_BASELINE=1 py -3.10 -m pytest tests/test_characterization.py`) when a change is meant to alter results, and review the JSON diff.
+- Lint/types: `py -3.10 -m ruff check .`, `py -3.10 -m mypy <path>` (strict; legacy root packages don't pass yet).
+- Ongoing refactor plan (bug list, target `quantlab/` architecture, steps): `~/.claude/plans/parallel-watching-crown.md`.
 - Secrets: `MASSIVE_API_KEY` is read from the environment or a `.env` file (template: `.env.example`; `.env` is gitignored).
 
 All scripts must be run from the repo root (imports are absolute from the root packages):
