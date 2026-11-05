@@ -11,8 +11,16 @@ class Target_Direction(TargetInterface):
         self.training_data_shift = 0
 
     def calculate(self, resolved_dependencies: dict[TargetID, TargetInterface] = None) -> None:
-        shifted = self.data['close'].iloc[5 : 5 - self.training_data_shift].reset_index(drop=True)
-        self.target = (shifted > self.data['close'][:-self.training_data_shift].reset_index(drop=True)).astype(int)
+        close = self.data['close']
+        shifted = close.shift(-5)
+        
+        # 1 pour UP, 0 pour DOWN
+        full_target = (shifted > close).astype(int)
+        
+        if self.training_data_shift > 0:
+            self.target = full_target.iloc[:-self.training_data_shift]
+        else:
+            self.target = full_target
         
 
     def update(self, new_data: pd.DataFrame, training_data_shift : int) -> None:

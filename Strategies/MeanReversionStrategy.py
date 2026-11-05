@@ -12,13 +12,14 @@ class MeanReversionStrategy(TradingStrategyInterface):
     """
     Stratégie de Mean Reversion basée sur les Bandes de Bollinger et le RSI.
     """
-    def __init__(self) -> None:
+    def __init__(self, rsi_threshold=30) -> None:
         super().__init__()
         self.strategy_id = 5
         self.symbol = "AAPL"
         self.IsRunning = False
         self.featureManager = FeatureManager()
         self.current_data = pd.DataFrame()
+        self.rsi_threshold = rsi_threshold
 
     def train(self, training_data: pd.DataFrame) -> None:
         self.featureManager.register_indicator(FeatureID.BOLLINGER_BANDS, BollingerBands(window=20, num_std_dev=2))
@@ -29,13 +30,13 @@ class MeanReversionStrategy(TradingStrategyInterface):
         self.featureManager.update(self.current_data)
 
     def test(self) -> None:
-        print("MeanReversion: BB + RSI + Volume Spike + ATR Filter.")
+        print(f"MeanReversion: BB + RSI({self.rsi_threshold}) + Volume Spike + ATR Filter.")
 
     def on_bar(self, bar) -> list[Order]:
         if not self.IsRunning:
             return []
 
-        self.current_data = pd.concat([self.current_data, bar.to_frame().T])
+        self.current_data = pd.concat([self.current_data, bar.to_frame().T]).iloc[-100:]
         self.featureManager.update(self.current_data)
         
         bb = self.featureManager.get_feature(FeatureID.BOLLINGER_BANDS)
@@ -60,10 +61,10 @@ class MeanReversionStrategy(TradingStrategyInterface):
         oversold = curr_price < (lower - 0.2 * curr_atr)
         overbought = curr_price > (upper + 0.2 * curr_atr)
         
-        if oversold and curr_rsi < 30 and vol_spike:
+        if oversold and curr_rsi < self.rsi_threshold and vol_spike:
             return [Order(strategy_ID=self.strategy_id, symbol=self.symbol, side='BUY', quantity=10)]
         
-        if overbought and curr_rsi > 70 and vol_spike:
+        if overbought and curr_rsi > (100 - self.rsi_threshold) and vol_spike:
             return [Order(strategy_ID=self.strategy_id, symbol=self.symbol, side='SELL', quantity=10)]
             
         return []

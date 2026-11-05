@@ -103,3 +103,35 @@ class DataManager:
         
         print(f"Données yfinance récupérées: {len(df)} points")
         return df
+
+    def collect_data_massive(self, symbol: str, days_back: int, until: int = 0) -> pd.DataFrame:
+        """
+        Collecte des données via Massive API.
+        Gère les tickers d'indices si nécessaire.
+        """
+        print(f"Collecte des données via Massive pour {symbol} sur {days_back} jours...")
+        
+        # Mapping symboles si besoin (ex: SPY -> SPY, ^GSPC -> I:SPX)
+        ticker = symbol
+        if symbol == "^GSPC" or symbol == "SPX":
+            ticker = "I:SPX"
+        elif symbol == "^FTSE" or symbol == "FTSE":
+            ticker = "I:FTSE"
+
+        df = self.massive_connector.get_intraday_data(ticker, days_back)
+        
+        if df.empty:
+            print(f"Attention: Aucune donnée récupérée via Massive pour {ticker}")
+            return pd.DataFrame()
+
+        # Filtrage 'until' (on retire les derniers jours si until > 0)
+        if until > 0:
+            limit_date = datetime.now() - timedelta(days=until)
+            df = df[df.index < limit_date]
+
+        print(f"Données Massive récupérées pour {ticker}: {len(df)} points")
+        
+        # Mise à jour du cache local
+        self._save_cache(symbol, df)
+        
+        return df

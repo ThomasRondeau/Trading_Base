@@ -11,14 +11,14 @@ class ArimaStrategy(TradingStrategyInterface):
     """
     Stratégie basée sur les prédictions ARIMA.
     """
-    def __init__(self) -> None:
+    def __init__(self, order=(5,1,1)) -> None:
         super().__init__()
         self.strategy_id = 2
         self.symbol = "AAPL"
         self.IsRunning = False
         self.featureManager = FeatureManager()
         self.targetManager = TargetManager()
-        self.model = ArimaModel(order=(5,1,1))
+        self.model = ArimaModel(order=order)
         self.current_data = pd.DataFrame()
 
     def train(self, training_data: pd.DataFrame) -> None:
@@ -35,7 +35,7 @@ class ArimaStrategy(TradingStrategyInterface):
         if not self.IsRunning:
             return []
 
-        self.current_data = pd.concat([self.current_data, bar.to_frame().T])
+        self.current_data = pd.concat([self.current_data, bar.to_frame().T]).iloc[-100:]
         self.featureManager.update(self.current_data)
         
         # Prédiction du prochain mouvement

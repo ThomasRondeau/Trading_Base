@@ -11,10 +11,17 @@ class Target_Amplitude(TargetInterface):
         self.training_data_shift = 0
 
     def calculate(self, resolved_dependencies: dict[TargetID, TargetInterface] = None) -> None:
-        shifted = self.data['close'].iloc[5 : 5 - self.training_data_shift].reset_index(drop=True)
-        close = self.data['close'][:-self.training_data_shift].reset_index(drop=True)
-
-        self.target = ((shifted - close) / close) * 100
+        # Target for index i is (price[i+5] - price[i]) / price[i]
+        close = self.data['close']
+        shifted = close.shift(-5)
+        
+        full_target = ((shifted - close) / close) * 100
+        
+        # On ne garde que la partie qui correspond aux features (avant le shift de sécurité)
+        if self.training_data_shift > 0:
+            self.target = full_target.iloc[:-self.training_data_shift]
+        else:
+            self.target = full_target
         
 
     def update(self, new_data: pd.DataFrame, training_data_shift : int) -> None:

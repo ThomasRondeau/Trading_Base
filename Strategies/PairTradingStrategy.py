@@ -11,7 +11,7 @@ class PairTradingStrategy(TradingStrategyInterface):
     Stratégie de Pair Trading (AAPL vs MSFT).
     Vend le sur-performant et achète le sous-performant quand le ratio s'écarte.
     """
-    def __init__(self) -> None:
+    def __init__(self, zscore_threshold=2.2) -> None:
         super().__init__()
         self.strategy_id = 3
         self.symbol_a = "AAPL"
@@ -19,7 +19,7 @@ class PairTradingStrategy(TradingStrategyInterface):
         self.IsRunning = False
         self.featureManager = FeatureManager()
         self.current_data = pd.DataFrame()
-        self.zscore_threshold = 2.2 # Plus sélectif
+        self.zscore_threshold = zscore_threshold # Plus sélectif
 
     def train(self, training_data: pd.DataFrame) -> None:
         # training_data est supposé contenir 'close_AAPL' et 'close_MSFT'

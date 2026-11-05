@@ -15,7 +15,7 @@ class DirectionModel(TradingModelInterface):
     pour déterminer la direction du mouvement.
     """
     
-    def __init__(self, model=None):
+    def __init__(self, model=None, max_depth=4):
         self.feature_manager = None
         self.target_manager = None
 
@@ -24,7 +24,7 @@ class DirectionModel(TradingModelInterface):
         else:
             self.model = xgb.XGBClassifier(
                 n_estimators=100,
-                max_depth=4,  # Reduced depth to prevent overfitting
+                max_depth=max_depth,  # Reduced depth to prevent overfitting
                 learning_rate=0.05,
                 subsample=0.8,
                 colsample_bytree=0.8,

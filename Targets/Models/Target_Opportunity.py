@@ -12,10 +12,17 @@ class Target_Opportunity(TargetInterface):
         self.threshold = 0.0005
 
     def calculate(self, resolved_dependencies: dict[TargetID, TargetInterface] = None) -> None:
-        shifted = self.data['close'].iloc[5 : 5 - self.training_data_shift].reset_index(drop=True)
-        close = self.data['close'][:-self.training_data_shift].reset_index(drop=True)
+        close = self.data['close']
+        shifted = close.shift(-5)
 
-        self.target = (((shifted - close) / close).abs() > self.threshold).astype(int)
+        amplitude = ((shifted - close) / close) * 100
+        full_target = (abs(amplitude) > 0.05).astype(int)
+
+        if self.training_data_shift > 0:
+            self.target = full_target.iloc[:-self.training_data_shift]
+        else:
+            self.target = full_target
+
         
 
     def update(self, new_data: pd.DataFrame, training_data_shift : int) -> None:

@@ -14,7 +14,7 @@ class CascadeStrategy(TradingStrategyInterface):
     Cette stratégie exécute des actions de trading en fonction des signaux fournis par les modèles.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, min_amplitude_threshold=0.05) -> None:
         """
         Initialise la stratégie avec les modèles nécessaires.
 
@@ -24,7 +24,7 @@ class CascadeStrategy(TradingStrategyInterface):
         self.IsRunning = False
         self.strategy_id = 1
         self.symbol = "AAPL"
-        self.min_amplitude_threshold = 0.05
+        self.min_amplitude_threshold = min_amplitude_threshold
 
         self.featureManager = FeatureManager()
         self.targetManager = TargetManager()
@@ -119,8 +119,8 @@ class CascadeStrategy(TradingStrategyInterface):
         if not self.IsRunning:
             raise RuntimeError("La stratégie doit être lancée.")
 
-        # 1. Mise à jour de l'historique de données avec la nouvelle bougie (bar)
-        self.current_data = pd.concat([self.current_data, bar.to_frame().T])
+        # 1. Mise à jour de l'historique de données (fenêtre glissante pour la performance)
+        self.current_data = pd.concat([self.current_data, bar.to_frame().T]).iloc[-200:]
         
         # 2. Mise à jour des indicateurs pour pouvoir prédire sur cette nouvelle bougie
         self.featureManager.update(self.current_data)
@@ -137,7 +137,6 @@ class CascadeStrategy(TradingStrategyInterface):
         
         # 3. Quelle amplitude ?
         amplitude = self.AmplitudeModel.predict()  # en %
-        print(f"Predicted direction: {direction}, amplitude: {amplitude}%")
         
         # 4. Vérifier si l'amplitude justifie le trade
         if abs(amplitude) < self.min_amplitude_threshold:

@@ -20,14 +20,14 @@ class MLHybridStrategy(TradingStrategyInterface):
     Stratégie Hybride : Mean Reversion + DirectionModel XGBoost.
     Ne prend un trade de retournement que si le modèle ML confirme la direction.
     """
-    def __init__(self) -> None:
+    def __init__(self, max_depth=4) -> None:
         super().__init__()
         self.strategy_id = 6
         self.symbol = "AAPL"
         self.IsRunning = False
         self.featureManager = FeatureManager()
         self.targetManager = TargetManager()
-        self.directionModel = DirectionModel()
+        self.directionModel = DirectionModel(max_depth=max_depth)
         self.current_data = pd.DataFrame()
         self.training_data_shift = 30
 
@@ -62,7 +62,7 @@ class MLHybridStrategy(TradingStrategyInterface):
         if not self.IsRunning:
             return []
 
-        self.current_data = pd.concat([self.current_data, bar.to_frame().T])
+        self.current_data = pd.concat([self.current_data, bar.to_frame().T]).iloc[-200:]
         self.featureManager.update(self.current_data)
         
         # Signaux techniques

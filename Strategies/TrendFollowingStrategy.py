@@ -10,17 +10,19 @@ class TrendFollowingStrategy(TradingStrategyInterface):
     """
     Stratégie de suivi de tendance simplifiée (SMA 5/20 Crossover).
     """
-    def __init__(self) -> None:
+    def __init__(self, sma_fast=5, sma_slow=20) -> None:
         super().__init__()
         self.strategy_id = 4
         self.symbol = "AAPL"
         self.IsRunning = False
         self.featureManager = FeatureManager()
         self.current_data = pd.DataFrame()
+        self.sma_fast = sma_fast
+        self.sma_slow = sma_slow
 
     def train(self, training_data: pd.DataFrame) -> None:
-        self.featureManager.register_indicator(FeatureID.SMA_5, SMA(window=5))
-        self.featureManager.register_indicator(FeatureID.SMA_20, SMA(window=20))
+        self.featureManager.register_indicator(FeatureID.SMA_5, SMA(window=self.sma_fast))
+        self.featureManager.register_indicator(FeatureID.SMA_20, SMA(window=self.sma_slow))
         self.featureManager.register_indicator(FeatureID.ATR, ATR(window=14))
         self.current_data = training_data.copy()
         self.featureManager.update(self.current_data)
@@ -32,7 +34,7 @@ class TrendFollowingStrategy(TradingStrategyInterface):
         if not self.IsRunning:
             return []
 
-        self.current_data = pd.concat([self.current_data, bar.to_frame().T])
+        self.current_data = pd.concat([self.current_data, bar.to_frame().T]).iloc[-100:]
         self.featureManager.update(self.current_data)
         
         sma5 = self.featureManager.get_feature(FeatureID.SMA_5).sma
