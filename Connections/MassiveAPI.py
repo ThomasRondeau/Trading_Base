@@ -1,15 +1,37 @@
-import requests
-import pandas as pd
+import os
 from datetime import datetime, timedelta
+from typing import Optional
+
+import pandas as pd
+import requests
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()  # Charge un éventuel fichier .env à la racine du projet
+except ImportError:  # python-dotenv est optionnel
+    pass
+
+API_KEY_ENV_VAR = "MASSIVE_API_KEY"
+
 
 class MassiveAPIClient:
     """
     Client pour l'API Massive (https://massive.com/docs/rest/)
     Permet de récupérer des données historiques intraday (OHLCV).
+
+    La clé API est lue dans la variable d'environnement MASSIVE_API_KEY
+    (ou dans un fichier .env), sauf si elle est passée explicitement.
     """
-    
-    def __init__(self, api_key: str = "cY1KibDdoJtqaZ1nb5ZcrdfUYM0vUgCP"):
-        self.api_key = api_key
+
+    def __init__(self, api_key: Optional[str] = None) -> None:
+        resolved_key = api_key or os.environ.get(API_KEY_ENV_VAR)
+        if not resolved_key:
+            raise RuntimeError(
+                f"Clé Massive API introuvable : définissez la variable d'environnement "
+                f"{API_KEY_ENV_VAR} (ou ajoutez-la dans un fichier .env, voir .env.example)."
+            )
+        self.api_key: str = resolved_key
         self.base_url = "https://api.massive.com"
 
     def fetch_data(self, symbol: str, days_back: int, until: int = 0) -> pd.DataFrame:

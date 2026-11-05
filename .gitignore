@@ -1,1 +1,14 @@
-*.pyc
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets
+.env
+
+# Données et sorties locales
+Connections/*_historical_data.csv
+Logs/

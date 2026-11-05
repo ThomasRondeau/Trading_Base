@@ -8,7 +8,10 @@ Modular Python quant-trading research system: technical-indicator features → M
 
 ## Running
 
-There is no build step, test suite, linter config or requirements file. Dependencies used: pandas, numpy, scikit-learn, xgboost, statsmodels, yfinance, ibapi, matplotlib, mplfinance, requests.
+Python 3.10 (on this machine `python` is 3.8 — use `py -3.10`). Dependencies are declared in `pyproject.toml`: `py -3.10 -m pip install -e .[dev]`.
+
+- Tests: `py -3.10 -m pytest` (single test: `py -3.10 -m pytest tests/test_walk_forward.py::test_expand_grid`). `pythonpath = ["."]` is set in `pyproject.toml`, so run from the repo root.
+- Secrets: `MASSIVE_API_KEY` is read from the environment or a `.env` file (template: `.env.example`; `.env` is gitignored).
 
 All scripts must be run from the repo root (imports are absolute from the root packages):
 
@@ -16,9 +19,8 @@ All scripts must be run from the repo root (imports are absolute from the root p
 - `python Main_<Arima|Hybrid|MeanReversion|PairTrading|Trend>.py` — single-strategy backtests.
 - `python Main_Project_Submission.py` — runs every strategy on ~6 months of 1-min data from Massive API (`Connections/MassiveAPI.py`).
 - `python Main_IBKR.py` / `python UI_App.py` — require TWS/IB Gateway running locally with the API enabled (127.0.0.1:7497).
-- `python scripts/optimize_<strategy>.py` — parameter sweeps; they append the repo root to `sys.path` themselves.
 - `python test_massive.py` — smoke test of the Massive API connection (not a unit test).
-- `python generate_report_assets.py` — produces figures in `report_assets/` for the LaTeX reports (`Rapport_Projet_Trading*.tex`).
+- `python Main_WalkForward.py` — example walk-forward hyperparameter search (TrendFollowing on yfinance data).
 
 ## Architecture
 
@@ -30,7 +32,8 @@ Pipeline: `DataManager` → `Strategy.train()` (registers features/targets, trai
 - **Models/** — implement `TradingModelInterface`. Models do not receive data directly: the strategy injects managers via `setFeatureManager` / `setTargetManager`, then calls `train()`, `test()`, `cross_validate()`, and `predict()` (no args — reads the current state of the feature manager).
 - **Look-ahead protection** — strategies feed `FeatureManager` with `training_data.iloc[:-training_data_shift]` while `TargetManager.update(training_data, training_data_shift=...)` receives the full frame; targets are forward-shifted (`Target_Plus_N`). Preserve this split when touching training code.
 - **Strategies/** — implement `TradingStrategyInterface`. `on_bar` raises unless `update_status(True)` was called (the engine does this in `run()`). Strategies keep a rolling `current_data` window (e.g. last 200 bars), re-run `featureManager.update` each bar, and return a list of `Types.Order(strategy_ID, symbol, side='BUY'|'SELL', quantity)`. `CascadeStrategy` chains Opportunity → Direction → Amplitude models and only trades when they agree.
-- **Engines/BacktestEngine** — the actual simulation lives inline in `run()`: orders fill at the current bar's close, positions exit after 5 bars or on stop-loss / take-profit from `RiskManager`, fees = 1 bp × quantity × (entry + exit). `print_summary` returns a metrics dict (win rate, net PnL %, annualized Sharpe from daily-grouped returns, max drawdown), which the optimize scripts consume. `BacktestOrderManager`/`OrderManager` are instantiated but not used for fills.
+- **Engines/BacktestEngine** — the actual simulation lives inline in `run()`: orders fill at the current bar's close, positions exit after 5 bars or on stop-loss / take-profit from `RiskManager`, fees = 1 bp × quantity × (entry + exit). `print_summary` returns a metrics dict (win rate, net PnL %, annualized Sharpe from daily-grouped returns, max drawdown). `BacktestOrderManager`/`OrderManager` are instantiated but not used for fills.
+- **Engines/WalkForwardOptimizer** — the single place for hyperparameter search (don't write per-strategy sweep scripts). Folds are `[train][embargo][validation][embargo][test]`: params are chosen on validation, refit on train+validation, scored once on test. It takes a `strategy_factory(**params)` because strategies register features in `train()` and cannot be retrained — every backtest needs a fresh instance. The objective is any key of the `print_summary` dict.
 - **Multi-symbol data** — for pair trading, bars carry `close_<SYMBOL>` columns; the engine looks up `close_{order.symbol}` and falls back to `close`.
 
 ## Adding components
