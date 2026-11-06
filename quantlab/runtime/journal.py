@@ -122,6 +122,7 @@ class JournalData:
         if rows.empty:
             return pd.DataFrame()
         payload = pd.DataFrame(list(rows["data"]), index=rows.index)
+        payload = payload.drop(columns=[c for c in ("bar_ts", "wall_ts", "strategy_id") if c in payload])
         return pd.concat([rows[["bar_ts", "wall_ts", "strategy_id"]], payload], axis=1).reset_index(drop=True)
 
 

@@ -9,6 +9,7 @@ quantlab command line: one entry point for research and trading.
     quantlab paper --strategy trend --symbol AAPL --session trend_aapl [--resume] [--live]
     quantlab replay --session trend_aapl
     quantlab plot --symbol SPY --source ibkr --days 3
+    quantlab ui                                     (graphical interface in the browser)
 
 Data sources: yfinance (2-minute bars, ~60 days), massive (1-minute, MASSIVE_API_KEY), ibkr (1-minute,
 needs TWS / IB Gateway), file (--file bars.parquet|csv). IBKR connection settings come from IBKR_* (see
@@ -18,26 +19,24 @@ needs TWS / IB Gateway), file (--file bars.parquet|csv). IBKR connection setting
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import logging
 import sys
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from quantlab.data.pairs import combine_symbols
-from quantlab.data.schema import validate_ohlcv
+from quantlab.data import loading
+from quantlab.data.loading import SOURCES, ibkr_client, split
 from quantlab.execution.risk import RiskLimits
 from quantlab.strategies.base import Strategy
 from quantlab.strategies.registry import STRATEGIES, build_strategy
 
 logger = logging.getLogger("quantlab")
 
-SOURCES = ("yfinance", "massive", "ibkr", "file")
+__all__ = ["SOURCES", "ibkr_client", "main", "parse_grid", "parse_params", "parse_value", "split"]
 
 
 # --- argument helpers --------------------------------------------------------------------------------------
@@ -81,51 +80,11 @@ def parse_grid(items: Sequence[str]) -> dict[str, list[Any]]:
     return grid
 
 
-def split(data: pd.DataFrame, test_days: float, test_fraction: float | None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Training / test blocks: the last `test_fraction` of the bars, or the last `test_days` calendar days."""
-    if test_fraction is not None:
-        cut = int(len(data) * (1 - test_fraction))
-        return data.iloc[:cut], data.iloc[cut:]
-    boundary = data.index[-1] - pd.Timedelta(days=test_days)
-    return data[data.index <= boundary], data[data.index > boundary]
-
-
-@contextmanager
-def ibkr_client(auto_reconnect: bool = False) -> Iterator[Any]:
-    from quantlab.execution.ibkr.client import IBKRClient
-
-    client = IBKRClient(auto_reconnect=auto_reconnect)
-    client.connect()
-    try:
-        yield client
-    finally:
-        client.disconnect()
-
-
 def load_bars(args: argparse.Namespace) -> pd.DataFrame:
-    if args.source == "file":
-        if not args.file:
-            raise SystemExit("--source file needs --file PATH")
-        path = Path(args.file)
-        raw = pd.read_parquet(path) if path.suffix == ".parquet" else pd.read_csv(path)
-        return raw if any(c.endswith(f"_{args.symbol[-1]}") for c in raw.columns) else validate_ohlcv(raw)
-
-    from quantlab.data.data_manager import DataManager
-
-    manager = DataManager()
-    frames: dict[str, pd.DataFrame] = {}
-    if args.source == "ibkr":
-        with ibkr_client() as client:
-            for symbol in args.symbol:
-                frames[symbol] = manager.collect_data_ibkr(client, symbol, args.days, 0)
-    else:
-        collect = manager.collect_data_yfinance if args.source == "yfinance" else manager.collect_data_massive
-        for symbol in args.symbol:
-            frames[symbol] = collect(symbol, args.days, 0)
-    for symbol, frame in frames.items():
-        if frame.empty:
-            raise SystemExit(f"No {args.source} data for {symbol}.")
-    return combine_symbols(frames)
+    try:
+        return loading.load_bars(args.symbol, args.source, args.days, args.file)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def build_strategies(args: argparse.Namespace) -> list[Strategy]:
@@ -215,21 +174,26 @@ def cmd_optimize(args: argparse.Namespace) -> int:
 
 
 def cmd_paper(args: argparse.Namespace) -> int:
-    from quantlab.execution.ibkr.live import LiveConfig, run_live_session
+    from quantlab.execution.ibkr.live import (
+        LiveConfig,
+        authorize_live_account,
+        needs_live_confirmation,
+        run_live_session,
+    )
 
     if len(args.strategy) != 1:
         raise SystemExit("paper takes exactly one --strategy")
     name = args.strategy[0]
     spec = STRATEGIES[name]
     with ibkr_client(auto_reconnect=True) as client:
-        settings = client.settings
-        if not settings.read_only and not client.is_paper:
+        if needs_live_confirmation(client):
             if not args.live:
                 raise SystemExit(f"{', '.join(client.accounts)} is a real-money account: pass --live to trade it.")
             typed = input(f"REAL MONEY on {', '.join(client.accounts)}. Type the account id to confirm: ")
-            if typed.strip() not in client.accounts:
-                raise SystemExit("Not confirmed: aborting.")
-            client.settings = dataclasses.replace(settings, allow_live_account=True)
+            try:
+                authorize_live_account(client, typed)
+            except PermissionError as exc:
+                raise SystemExit(str(exc)) from exc
         session = args.session or f"{name}_{'_'.join(args.symbol)}_{date.today():%Y%m%d}"
         params = parse_params(args.param, [name])[name]
         config = LiveConfig(
@@ -262,17 +226,22 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
 
 def cmd_plot(args: argparse.Namespace) -> int:
-    from quantlab.analysis.plot import plot_levels
+    from quantlab.analysis.plot import plot_levels, session_bars
 
-    data = load_bars(args)
-    index = pd.DatetimeIndex(data.index).tz_convert("America/New_York")
-    day = pd.Timestamp(args.date).date() if args.date else index[-1].date()
-    session = data[index.date == day]
-    if session.empty:
-        raise SystemExit(f"No bar on {day}.")
-    session = session.set_axis(pd.DatetimeIndex(session.index).tz_convert("America/New_York"))  # exchange time
+    try:
+        session, day = session_bars(load_bars(args), args.date)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     plot_levels(session, f"{args.symbol[0]} {day} (New York time)", output=args.output)
     return 0
+
+
+def cmd_ui(args: argparse.Namespace) -> int:
+    import subprocess
+
+    app = Path(__file__).parent / "ui" / "app.py"
+    command = [sys.executable, "-m", "streamlit", "run", str(app), "--server.port", str(args.port)]
+    return subprocess.call(command)
 
 
 # --- parser ------------------------------------------------------------------------------------------------
@@ -348,6 +317,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--date", help="session date (default: the last one)")
     p.add_argument("--output", help="save to this image file instead of showing")
     p.set_defaults(func=cmd_plot)
+
+    p = commands.add_parser("ui", help="graphical interface in the browser (Streamlit)")
+    p.add_argument("--port", type=int, default=8501)
+    p.set_defaults(func=cmd_ui)
     return parser
 
 

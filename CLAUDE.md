@@ -25,6 +25,7 @@ Command line (`quantlab/cli.py`; `py -3.10 -m quantlab --help`, or `quantlab` af
 - `optimize --strategy NAME --grid k=v1,v2 ... --train-size --validation-size --test-size [--embargo]` — walk-forward search.
 - `paper --strategy NAME --symbol S --session NAME [--resume] [--live]` — journaled session on live IBKR bars in `sessions/NAME/`: shadow mode (simulated fills, no orders) while read-only, paper trading through `IBKRBroker` otherwise; a real-money account needs `--live` plus typing the account id. Conservative risk defaults (10 shares/order, 50/position, 1 % daily-loss kill switch).
 - `replay --session NAME` — replays a session in the backtester; `plot --symbol S --source ...` — VWAP + support/resistance chart of one session.
+- `ui` — Streamlit GUI (`quantlab/ui/`, French labels) with every CLI feature plus charts: pages Backtest, Optimisation, Session live (sessions run in background threads, `ui/live_runner.py`), Sessions & replay, Graphique. Pages call the same library functions as the CLI (`data/loading.py`, `live.authorize_live_account`, `analysis/plot.levels_figure`); keep both in sync when adding a feature. Tested headless with `streamlit.testing.v1.AppTest` (`tests/test_ui.py`).
 
 Pre-commit (`.pre-commit-config.yaml`: ruff check/format, mypy strict on `quantlab/`): `py -3.10 -m pre_commit install`; on this machine set `VIRTUALENV_OVERRIDE_APP_DATA=C:/Users/Thomas/.cache/virtualenv` first (Windows Store Python long-path issue).
 

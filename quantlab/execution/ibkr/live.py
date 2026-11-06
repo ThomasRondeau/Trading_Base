@@ -48,6 +48,18 @@ class LiveConfig:
     slippage_bps: float = 1.0
 
 
+def needs_live_confirmation(client: IBKRClient) -> bool:
+    """True when orders would go to a real-money account that the settings do not allow yet."""
+    return not client.settings.read_only and not client.is_paper and not client.settings.allow_live_account
+
+
+def authorize_live_account(client: IBKRClient, typed_account: str | None) -> None:
+    """Allow a real-money account only when the user typed one of its account ids (explicit confirmation)."""
+    if (typed_account or "").strip() not in client.accounts:
+        raise PermissionError(f"Real-money account {', '.join(client.accounts)} not confirmed: orders refused.")
+    client.settings = dataclasses.replace(client.settings, allow_live_account=True)
+
+
 def session_mode(client: IBKRClient) -> str:
     if client.settings.read_only:
         return "shadow"

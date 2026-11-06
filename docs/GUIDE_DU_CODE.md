@@ -9,6 +9,7 @@ Ce document décrit **l'organisation du code** : les modules, les classes princi
 ```bash
 py -3.10 -m pip install -e .[dev]        # dépendances (Python 3.10 ; sur cette machine `python` est la 3.8)
 py -3.10 -m quantlab --help              # CLI (ou `quantlab --help` après l'installation)
+py -3.10 -m quantlab ui                  # interface graphique dans le navigateur (Streamlit)
 py -3.10 -m pytest                       # tous les tests (~2 min)
 py -3.10 -m pytest -m "not slow"         # sans les backtests de bout en bout (~15 s)
 py -3.10 -m ruff check . && py -3.10 -m ruff format .
@@ -48,13 +49,14 @@ Les secrets et les réglages IBKR se mettent dans `.env` (modèle : `.env.exampl
 
 ```
 quantlab/
-├── cli.py                  point d'entrée : backtest | optimize | paper | replay | plot
+├── cli.py                  point d'entrée : backtest | optimize | paper | replay | plot | ui
 ├── __main__.py             `python -m quantlab`
 ├── config.py               IBKRSettings.from_env() (IBKR_HOST/PORT/CLIENT_ID/READ_ONLY/ALLOW_LIVE)
 ├── targets.py              ForwardTarget (cibles des modèles)
 ├── data/
 │   ├── schema.py           validate_ohlcv, bar_value, bar_time
 │   ├── pairs.py            combine_symbols (format multi-symboles)
+│   ├── loading.py          load_bars, split, ibkr_client (partagés par la CLI et l'interface)
 │   ├── data_manager.py     DataManager : yfinance, Massive, IBKR (+ cache CSV)
 │   └── massive.py          MassiveAPIClient
 ├── features/
@@ -96,7 +98,11 @@ quantlab/
 │   └── walk_forward.py     WalkForwardOptimizer, make_folds, expand_grid
 └── analysis/
     ├── replay.py           replay_session, compare_journals, bar_differences
-    └── plot.py             plot_levels (graphique VWAP + supports et résistances)
+    └── plot.py             session_bars, levels_figure, plot_levels (VWAP + supports et résistances)
+└── ui/                     interface graphique Streamlit (libellés en français)
+    ├── app.py              les 5 pages : Backtest, Optimisation, Session live, Sessions & replay, Graphique
+    ├── charts.py           graphiques Altair (capital, drawdown, P&L par trade, barres, courbes)
+    └── live_runner.py      LiveSessions : sessions live en tâche de fond (statut, erreurs, arrêt)
 ```
 
 ---
@@ -182,11 +188,10 @@ Implémentations : `SimulatedBroker`, `IBKRBroker`, et `JournalingBroker`, une e
 ### 4.7 `StrategyRunner` (`runtime/runner.py`)
 
 ```python
-runner = StrategyRunner(strategies, broker, RiskManager(limits), capital=100_000,
-                        journal=None, state_store=None)
-runner.run(feed)        # bloquant ; runner.stop() depuis un autre thread
-runner.step(bar)        # une barre
-runner.catch_up(bars)   # rattrapage après redémarrage (pas de décision)
+runner = StrategyRunner(strategies, broker, RiskManager(limits), capital=100_000, journal=None, state_store=None)
+runner.run(feed)  # bloquant ; runner.stop() depuis un autre thread
+runner.step(bar)  # une barre
+runner.catch_up(bars)  # rattrapage après redémarrage (pas de décision)
 runner.equity, runner.latencies_ms, runner.portfolio, runner.router
 runner.get_state() / runner.set_state(state)
 ```
@@ -217,14 +222,14 @@ class EMA(Feature):
 
     @property
     def name(self) -> str:
-        return f"ema_{self.span}{_suffix(self.source)}"    # nom = paramètres
+        return f"ema_{self.span}{_suffix(self.source)}"  # nom = paramètres
 
     def inputs(self) -> Sequence[Feature]:
         return source_inputs(self.source)
 
     @property
     def warmup(self) -> int:
-        return ewm_warmup(self.span)                         # EWM : convergence à 1e-10
+        return ewm_warmup(self.span)  # EWM : convergence à 1e-10
 
     def compute(self, data: pd.DataFrame, computed: Computed) -> pd.Series:
         return source_series(self.source, data, computed).ewm(span=self.span, adjust=False).mean()
@@ -283,19 +288,20 @@ Points d'attention :
 Tout estimateur compatible scikit-learn (avec `fit` et `predict`) peut être enveloppé :
 
 ```python
-model = SklearnModel(GradientBoostingClassifier(max_depth=3), features.outputs,
-                     ForwardTarget(5, "direction"), accuracy_score)
+model = SklearnModel(
+    GradientBoostingClassifier(max_depth=3), features.outputs, ForwardTarget(5, "direction"), accuracy_score
+)
 X, y = model.dataset(history, self.feed.pipeline.compute(history), drop_last=30)
 model.fit(X, y)
 model.predict_row(self.feed.row())
-model.cross_validate(X, y)          # validation croisée chronologique sur des clones
+model.cross_validate(X, y)  # validation croisée chronologique sur des clones
 ```
 
 L'estimateur doit pouvoir être sauvé avec `pickle`, car les sessions live en ont besoin.
 
 ### 5.4 Ajouter une source de données
 
-Ajouter une méthode `collect_data_<source>(symbol, days_back, until)` à `DataManager` qui **renvoie `validate_ohlcv(...)`**. Ajouter ensuite son nom dans `SOURCES` et dans `load_bars` de `cli.py`, et écrire un test avec une réponse simulée, sans réseau, comme pour Massive dans `test_bugfixes.py`.
+Ajouter une méthode `collect_data_<source>(symbol, days_back, until)` à `DataManager` qui **renvoie `validate_ohlcv(...)`**. Ajouter ensuite son nom dans `SOURCES` et dans `load_bars` de `data/loading.py` (la CLI et l'interface en profitent toutes les deux), et écrire un test avec une réponse simulée, sans réseau, comme pour Massive dans `test_bugfixes.py`.
 
 ### 5.5 Ajouter un broker
 
@@ -306,6 +312,15 @@ Implémenter le protocole `Broker` (§4.5) :
 - fournir `get_state` et `set_state` pour la reprise.
 
 ---
+
+### 5.6 L'interface graphique
+
+L'interface (`quantlab/ui/app.py`) n'a pas de logique propre : chaque page appelle les mêmes fonctions que la CLI. Pour ajouter une fonctionnalité, l'écrire dans la bibliothèque, puis brancher la commande CLI **et** la page.
+
+- Les paramètres d'une stratégie sont lus automatiquement dans la signature de son constructeur (`strategy_signature`). Une nouvelle stratégie enregistrée dans `registry.py` apparaît donc dans toutes les pages sans code d'interface, avec un champ libre `clé=valeur` en plus.
+- Streamlit ré-exécute le script à chaque interaction. Les résultats à conserver vont dans `st.session_state`, les objets à garder pendant toute la vie du serveur dans `st.cache_resource` (le registre des sessions live), et les données téléchargées dans `st.cache_data`.
+- Les sessions live tournent dans des threads (`LiveSessions`). La page les surveille toutes les 5 s en relisant leur journal (`st.fragment(run_every=5)`).
+- Graphiques : couleurs par rôle (ordre catégoriel fixe, bleu pour une série unique, bleu / rouge pour gains / pertes), infobulles au survol, heure de New York.
 
 ## 6. Points délicats
 
@@ -329,6 +344,7 @@ Implémenter le protocole `Broker` (§4.5) :
 | `test_ibkr.py` | client, broker et flux IBKR contre un **faux `EClient`** (`ibkr_fakes.py`) : garde-fous de lecture seule et de compte réel, historique, erreurs, timeouts, reconnexion, commissions, doublons, agrégation des barres, scénario paper complet |
 | `test_session.py` | journal, reprise identique à une exécution sans interruption, rattrapage, replay (accord des signaux, mesure du slippage), session shadow complète avec reprise, récupération IBKR après redémarrage, sauvegarde de toutes les stratégies |
 | `test_cli.py` | parsing des arguments, registre, commandes `backtest` et `optimize` sur les fixtures |
+| `test_ui.py` | interface Streamlit sans navigateur (`AppTest`) : chaque page s'affiche, backtest, replay et graphique de bout en bout, sessions live en tâche de fond sur le faux TWS, refus d'un compte réel non confirmé |
 | `test_bugfixes.py` | régressions des bugs corrigés pendant le refactoring (A1 à A12) et fuite de la clé Massive |
 | `test_walk_forward.py` | découpage des folds, embargo, sélection des paramètres, instances neuves |
 | `test_latency.py` (slow) | latence médiane de `on_bar` pour Cascade < 100 ms |

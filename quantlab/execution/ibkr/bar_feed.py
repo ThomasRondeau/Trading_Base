@@ -118,7 +118,6 @@ class IBKRBarFeed:
         self._stop.set()
 
     def __iter__(self) -> Iterator[pd.Series | None]:
-        self._stop.clear()
         req_ids = [
             self.client.subscribe_realtime_bars(
                 stock(symbol), self._queue.put, use_rth=self.use_rth, on_error=self._queue.put

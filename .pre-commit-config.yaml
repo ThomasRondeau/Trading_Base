@@ -16,5 +16,5 @@ repos:
       - id: mypy
         files: ^quantlab/
         args: [--config-file=pyproject.toml]
-        additional_dependencies: [pandas-stubs, numpy, types-requests]
+        additional_dependencies: [pandas-stubs, numpy, types-requests, streamlit, altair]
 

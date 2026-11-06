@@ -22,6 +22,8 @@ Le principe directeur : **un seul code pour le backtest et le live**. Features, 
 
 Toute optimisation propre au backtest, comme le précalcul des features, doit être **prouvée identique** au chemin live par un test de parité.
 
+On pilote l'application soit par la ligne de commande (`py -3.10 -m quantlab …`), soit par l'**interface graphique** (`py -3.10 -m quantlab ui`), qui s'ouvre dans le navigateur. Les deux font exactement la même chose, avec le même code. L'interface ajoute des graphiques : courbe de capital, drawdown, P&L par trade, scores par fold, suivi des sessions live en direct et écarts du replay.
+
 ---
 
 ## 2. Vue d'ensemble

@@ -26,7 +26,8 @@ dependencies = [
 quantlab = "quantlab.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "pandas-stubs", "types-requests", "pre-commit>=3"]
+ui = ["streamlit>=1.40"]
+dev = ["streamlit>=1.40", "pytest>=8", "ruff>=0.6", "mypy>=1.11", "pandas-stubs", "types-requests", "pre-commit>=3"]
 
 [tool.setuptools.packages.find]
 include = ["quantlab*"]
@@ -47,3 +48,8 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 python_version = "3.10"
 strict = true
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Altair's chart builders are typed as returning Any
+module = "quantlab.ui.charts"
+warn_return_any = false
