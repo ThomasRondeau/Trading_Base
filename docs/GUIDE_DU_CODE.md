@@ -142,7 +142,9 @@ Une `Source` est soit le nom d'une colonne brute (`"close"`), soit une feature �
 
 | Attribut | Rôle |
 |---|---|
-| `holding_bars` | durée de détention avant la sortie au marché (5 par défaut ; `None` = seulement stop / objectif) |
+| `stop_loss_pct`, `take_profit_pct` | stop et objectif en % du prix d'entrée (2 et 5 ; 0 / `None` = aucun) — paramètres du constructeur |
+| `stop_atr`, `take_profit_atr`, `atr_window` | niveaux en multiples d'ATR mesuré au signal, à la place des % (ATR ajouté automatiquement aux features) |
+| `holding_bars` | durée de détention avant la sortie au marché (5 ; 0 / `None` = seulement stop / objectif) — paramètre du constructeur |
 | `min_history` | barres brutes lues via `feed.bars(n)` en plus du warmup des features |
 | `diagnostics` | dictionnaire remis à zéro à chaque barre ; journalisé (ex. prédictions) |
 
@@ -179,9 +181,10 @@ Implémentations : `SimulatedBroker`, `IBKRBroker`, et `JournalingBroker`, une e
 
 ### 4.6 `OrderRouter` (`execution/router.py`)
 
-- Pour envoyer : `submit_entry(order, holding_bars) -> Order | None` (passe par le risque et ouvre un `Lot`).
+- Pour envoyer : `submit_entries(orders)` ou `submit_entry(order) -> Order | None` (passe par le risque et ouvre un `Lot` qui fige `order.exit_plan`). Un plan sans stop est refusé (`RiskLimits.require_stop`). Les ordres d'un même `group_id` passent tous ou aucun.
+- Sortie demandée par une stratégie : `exit_strategy(strategy_id, symbol=None, reason)` ; un groupe sort en entier.
 - Callbacks branchés sur le broker : `on_fill`, `on_status`.
-- À chaque barre : `on_bar_close(ts)` gère les sorties au temps et le coupe-circuit ; `flatten(reason)` liquide tout.
+- À chaque barre : `on_bar_close(ts)` gère les sorties au temps, les sorties demandées en attente, le stop / objectif combiné des groupes et le coupe-circuit ; `flatten(reason)` liquide tout.
 - Lecture : `lots` (ouverts), `trades` (`Trade` clôturés : `pnl`, `pnl_net`, `return_pct`), `open_trades(prix, ts)`, `exposure(symbole)`.
 - Persistance : `get_state()`, `set_state()`, `orders()`.
 
@@ -250,9 +253,8 @@ Dans `strategies/breakout.py` :
 class BreakoutStrategy(Strategy):
     """Buy when the close breaks above its moving average by k ATRs (and vice versa)."""
 
-    holding_bars = 10
-
-    def __init__(self, window: int = 20, k: float = 2.0, symbol: str = "AAPL", **kwargs: str) -> None:
+    def __init__(self, window: int = 20, k: float = 2.0, symbol: str = "AAPL", **kwargs: Any) -> None:
+        kwargs.setdefault("holding_bars", 10)  # exit parameters: see Strategy.__init__
         super().__init__(symbol=symbol, **kwargs)
         self.k = k
         self.sma, self.atr = SMA(window), ATR(14)
@@ -279,7 +281,7 @@ Ensuite :
 Points d'attention :
 
 - n'utiliser que `self.feed`, c'est-à-dire les données jusqu'à la barre courante ; jamais de DataFrame global ;
-- ne pas gérer les sorties : elles relèvent de `holding_bars` et des `RiskLimits` ;
+- les sorties viennent du plan de sortie de chaque entrée, construit par `exit_plan()` à partir des paramètres de sortie. Pour un niveau propre au signal : `self.order(side, qty, exit_plan=replace(self.exit_plan(), target=Level.at(prix)))`. Pour fermer ses positions sur un signal : `self.close_positions(reason="...")`. Pour une paire : `self.group([jambe_a, jambe_b], plan)`. Le router exécute toutes les sorties ;
 - pour un modèle ML, implémenter `train(history)` comme dans `MLHybridStrategy`, avec `drop_last` au moins égal à l'horizon de la cible ;
 - pour la latence live, garder des prédictions sur une seule ligne (`SklearnModel.predict_row`) ; budget : 100 ms par barre.
 

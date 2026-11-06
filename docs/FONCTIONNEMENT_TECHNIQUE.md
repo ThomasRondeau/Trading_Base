@@ -166,7 +166,17 @@ Une stratégie déclare ses features, entraîne éventuellement ses modèles, et
 | `arima` | `ArimaStrategy` | trade si le mouvement prévu par l'ARIMA dépasse les frais aller-retour |
 | `pair` | `PairTradingStrategy` | z-score lissé du ratio de deux prix : vend l'actif surperformant et achète l'autre au-delà d'un seuil |
 
-Chaque stratégie expose `holding_bars` (durée de détention, 5 barres par défaut). Elle peut aussi remplir `diagnostics` (par exemple ses prédictions), qui est enregistré dans le journal à chaque barre.
+Chaque stratégie a ses **paramètres de sortie** (classe de base `Strategy`), réglables avec `--param` (`trend.stop_atr=1.5`) ou dans la section « Sorties » de l'interface :
+
+| Paramètre | Défaut | Rôle |
+|---|---|---|
+| `stop_loss_pct` | 2 | stop, en % du prix d'entrée (0 = aucun : l'entrée est alors refusée) |
+| `take_profit_pct` | 5 | objectif, en % du prix d'entrée (0 = aucun) |
+| `stop_atr`, `take_profit_atr` | aucun | distance en multiples d'ATR mesurée au signal ; remplace le % correspondant |
+| `atr_window` | 14 | fenêtre de cet ATR |
+| `holding_bars` | 5 | sortie au marché après ce nombre de barres (0 = aucune) |
+
+Une stratégie peut aussi ajuster le plan d'un signal précis : `mean_reversion` avec `target_middle_band=true` vise la bande de Bollinger médiane du moment. Elle peut enfin demander la fermeture de ses propres positions (`close_positions()`) : `pair` le fait quand le z-score revient sous `exit_zscore`. Elle peut également remplir `diagnostics` (par exemple ses prédictions), qui est enregistré dans le journal à chaque barre.
 
 ---
 
@@ -174,27 +184,39 @@ Chaque stratégie expose `holding_bars` (durée de détention, 5 barres par déf
 
 ### 7.1 Ordres et lots
 
-Chaque ordre d'entrée émis par une stratégie ouvre un **lot** qui appartient à cette stratégie. L'`OrderRouter` gère son cycle de vie :
+Chaque ordre d'entrée émis par une stratégie porte un **plan de sortie** (`ExitPlan`, `execution/exits.py`) : stop, objectif, durée maximale. Il ouvre un **lot** qui appartient à cette stratégie, et le plan y est **figé** : il est sauvegardé avec le lot, journalisé avec le signal, et ne change plus, même après une reprise de session. L'`OrderRouter` gère le cycle de vie du lot :
 
 ```
- signal (close de t) ──► contrôle de risque ──► ordre MARKET ──► fill (open de t+1)
-                                                                    │
-                       paire OCA placée chez le broker ◄────────────┘
-                       ├─ STOP  au prix d'entrée × (1 − 2 %)   (stop loss)
-                       └─ LIMIT au prix d'entrée × (1 + 5 %)   (take profit)
+ signal (close de t) + plan ──► contrôle de risque ──► ordre MARKET ──► fill (open de t+1)
+                                                                          │
+                       paire OCA du lot placée chez le broker ◄───────────┘
+                       ├─ STOP  au niveau du plan (ex. fill × (1 − 2 %), fill − 1,5 ATR)
+                       └─ LIMIT au niveau du plan (ex. fill × (1 + 5 %), bande médiane)
                                     │
-         ┌──────────────────────────┼────────────────────────────────────┐
-         ▼                          ▼                                    ▼
-  le stop est touché        l'objectif est touché            holding_bars écoulées :
-  (l'objectif est annulé)   (le stop est annulé)             annulation de la paire OCA,
-                                                             sortie au marché
+         ┌──────────────────────────┼──────────────────────────┬──────────────────────────┐
+         ▼                          ▼                          ▼                          ▼
+  le stop est touché        l'objectif est touché      holding_bars du plan :     la stratégie demande
+  (l'objectif est annulé)   (le stop est annulé)       annulation de la paire     la sortie : idem
+                                                       OCA, sortie au marché
 ```
+
+- Les niveaux d'un plan s'expriment en **% du prix de fill**, en **distance** (par exemple k × ATR mesuré au signal) ou en **prix absolu**. Les deux premiers sont ancrés au prix de fill réel, que la stratégie ne connaît pas au moment du signal. Si le fill a déjà dépassé un niveau absolu (gap), le lot est fermé au marché aussitôt (raisons `stop_gap` / `target_gap`).
+- Une entrée **sans stop est refusée** (`RiskLimits.require_stop`, actif par défaut).
 
 - **OCA** (« one cancels all ») : quand l'un des deux ordres s'exécute, le broker annule l'autre. Chez IBKR, ces ordres protecteurs sont en GTC, donc **ils restent actifs même si l'application plante**.
 - Les prix protecteurs partent du **prix de fill réel** et sont arrondis au tick (0,01).
 - Les fills sont attribués aux lots par identifiant d'ordre. Les fills partiels sont gérés : la protection n'est posée qu'une fois l'entrée complète ou close.
 - Plusieurs stratégies peuvent détenir des lots sur le même symbole. La position chez le broker est leur somme nette, et la sortie d'un lot la modifie exactement de la quantité de ce lot. Il n'y a pas de compensation (« netting ») des ordres entre stratégies : la sortie d'un lot reste exacte, au prix de quelques frais en plus.
 - **Course critique en live** : si le stop s'exécute pendant qu'une sortie au temps est en vol, le lot est « sur-fermé ». L'excédent devient un lot de correction, refermé immédiatement.
+
+### 7.1 bis Groupes de lots (paires)
+
+Les entrées qui partagent un `group_id` forment un **groupe** : ce sont les deux jambes d'une paire (`Strategy.group()`).
+
+- **Tout ou rien** : si le contrôle de risque refuse ou réduit une jambe, aucune n'est envoyée, ce qui évite une paire déséquilibrée.
+- **Sortie commune** : le stop et l'objectif du plan s'appliquent au **P&L combiné** des jambes, en fraction de leur notionnel brut d'entrée. Ils sont vérifiés à chaque clôture de barre, et toutes les jambes sortent ensemble au marché. La sortie au temps et la sortie demandée par la stratégie ferment aussi tout le groupe.
+- **Stop de jambe** : un ordre posé chez le broker ne peut pas surveiller un spread. Chaque jambe porte donc seulement un stop large (`leg_stop`, `leg_stop_pct` = 5 % pour `pair`), qui la protège si l'application tombe. S'il s'exécute, l'autre jambe est fermée aussitôt (`leg_stop`).
+- **Jambe manquante** : si l'entrée d'une jambe est rejetée ou annulée sans exécution, les autres jambes sont fermées (`leg_missing`).
 
 ### 7.2 Le broker simulé
 
@@ -215,11 +237,11 @@ Le `Portfolio` suit le cash, la position nette et le prix moyen par symbole, ain
 
 ## 8. Gestion du risque
 
-Le `RiskManager` contrôle **chaque ordre d'entrée** avant son envoi. Les sorties (stops, objectifs, sorties au temps, liquidation) ne sont jamais bloquées.
+Le `RiskManager` contrôle **chaque ordre d'entrée** avant son envoi. Les sorties (stops, objectifs, sorties au temps, liquidation) ne sont jamais bloquées. Le stop, l'objectif et la durée d'une position ne sont pas des limites de risque : ils viennent du plan de sortie de la stratégie (section 7.1). Les limites ci-dessous protègent le compte.
 
 | Limite (`RiskLimits`) | Effet |
 |---|---|
-| `stop_loss_pct`, `take_profit_pct` | niveaux des ordres protecteurs (`None` = pas d'ordre) |
+| `require_stop` | entrée refusée si son plan de sortie n'a pas de stop (actif par défaut) |
 | `max_order_quantity` | quantité de l'ordre **réduite** à ce plafond |
 | `max_position_quantity` | position nette par symbole, ordres d'entrée en attente compris : l'ordre est réduit, ou refusé s'il n'y a plus de marge |
 | `max_daily_loss_pct` | **coupe-circuit** : si l'equity tombe de ce pourcentage sous celle du début de journée, le trading s'arrête, les entrées en attente sont annulées et, par défaut (`flatten_on_halt`), toutes les positions sont fermées |

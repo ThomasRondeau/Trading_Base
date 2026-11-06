@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +51,12 @@ class ReplayReport:
             logger.info("Signals not matched:\n%s", mismatched.to_string())
 
 
+def _risk_limits(saved: dict[str, Any]) -> RiskLimits:
+    """The session's limits (fields of older versions, such as the former global stop / target, are dropped)."""
+    known = {f.name for f in fields(RiskLimits)}
+    return RiskLimits(**{k: v for k, v in saved.items() if k in known})
+
+
 def replay_session(
     session_dir: str | Path, fee_bps: float | None = None, slippage_bps: float | None = None
 ) -> ReplayReport:
@@ -62,7 +68,7 @@ def replay_session(
         raise ValueError(f"No bar in the journal of {session_dir}.")
 
     runner_kwargs: dict[str, Any] = {
-        "risk": RiskManager(RiskLimits(**meta["risk"])),
+        "risk": RiskManager(_risk_limits(meta["risk"])),
         "capital": float(meta["capital"]),
     }
     broker = SimulatedBroker(

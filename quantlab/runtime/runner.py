@@ -2,7 +2,7 @@
 The single trading loop, for backtest and live alike:
 
     BarFeed -> broker.on_bar (simulator fills) -> router time exits / kill switch
-            -> strategy.on_bar -> router.submit_entry (risk) -> Broker
+            -> strategy.on_bar -> router.exit_strategy (close requests) / submit_entries (risk) -> Broker
 
 A backtest is this runner on a `HistoricalBarFeed` with a `SimulatedBroker`; paper / live trading is the
 same runner on an IBKR bar feed with an `IBKRBroker`. Everything runs on the caller's thread: a live
@@ -111,15 +111,24 @@ class StrategyRunner:
         self._mark(bar)
         self.router.on_bar_close(timestamp)
         for strategy in self.strategies:
-            for order in strategy.on_bar(bar):
-                sent = self.router.submit_entry(order, strategy.holding_bars)
+            orders = strategy.on_bar(bar)
+            for symbol, reason in strategy.pop_exit_requests():
+                closed = self.router.exit_strategy(strategy.strategy_id, symbol, reason)
+                if closed and self.journal is not None:
+                    self.journal.event(
+                        "exit", {"symbol": symbol, "reason": reason, "lots": closed}, strategy.strategy_id
+                    )
+            for order, sent in zip(orders, self.router.submit_entries(orders), strict=True):
                 if self.journal is not None:
+                    plan = order.exit_plan.describe() if order.exit_plan else {}
                     signal = {
                         "order_id": order.order_id,
                         "symbol": order.symbol,
                         "side": order.side.value,
                         "quantity": order.quantity,
                         "sent_quantity": sent.quantity if sent else 0,
+                        "group_id": order.group_id,
+                        **plan,
                     }
                     self.journal.event("signal", signal, strategy.strategy_id)
         latency = (time.perf_counter() - start) * 1e3

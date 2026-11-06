@@ -4,6 +4,8 @@ quantlab command line: one entry point for research and trading.
     quantlab backtest --strategy trend --symbol AAPL --source yfinance --days 55 --test-days 5
     quantlab backtest --strategy cascade --strategy trend --symbol SPY --source massive --days 180 --each
     quantlab backtest --strategy pair --symbol AAPL --symbol MSFT --param zscore_threshold=2.0
+    quantlab backtest --strategy trend --strategy mean_reversion --symbol AAPL --param trend.stop_atr=1.5 \
+                      --param mean_reversion.target_middle_band=true --param holding_bars=10
     quantlab optimize --strategy trend --symbol AAPL --grid sma_fast=5,10,20 --grid sma_slow=30,50,100 \\
                       --train-size 3000 --validation-size 1000 --test-size 1000 --embargo 30
     quantlab paper --strategy trend --symbol AAPL --session trend_aapl [--resume] [--live]
@@ -14,6 +16,10 @@ quantlab command line: one entry point for research and trading.
 Data sources: yfinance (2-minute bars, ~60 days), massive (1-minute, MASSIVE_API_KEY), ibkr (1-minute,
 needs TWS / IB Gateway), file (--file bars.parquet|csv). IBKR connection settings come from IBKR_* (see
 .env.example); `paper` runs in shadow mode (no order sent) while IBKR_READ_ONLY=true.
+
+Exits are strategy parameters (--param, per strategy with name.key=value): stop_loss_pct (2), take_profit_pct
+(5), stop_atr / take_profit_atr (ATR multiples, replace the percentages), atr_window (14), holding_bars (5);
+0 or none disables one. An entry without a stop is refused.
 """
 
 from __future__ import annotations
@@ -45,10 +51,12 @@ __all__ = ["SOURCES", "ibkr_client", "main", "parse_grid", "parse_params", "pars
 
 
 def parse_value(text: str) -> Any:
-    """'10' -> 10, '2.5' -> 2.5, 'true' -> True, anything else stays a string."""
+    """'10' -> 10, '2.5' -> 2.5, 'true' -> True, 'none' -> None, anything else stays a string."""
     lowered = text.strip().lower()
     if lowered in ("true", "false"):
         return lowered == "true"
+    if lowered in ("none", "null"):
+        return None
     for cast in (int, float):
         try:
             return cast(text)
@@ -99,8 +107,6 @@ def risk_limits(args: argparse.Namespace) -> RiskLimits:
         return None if value is None or value <= 0 else value / 100
 
     return RiskLimits(
-        stop_loss_pct=pct(args.stop_loss),
-        take_profit_pct=pct(args.take_profit),
         max_order_quantity=args.max_order,
         max_position_quantity=args.max_position,
         max_daily_loss_pct=pct(args.max_daily_loss),
@@ -274,20 +280,31 @@ def build_parser() -> argparse.ArgumentParser:
     strategy.add_argument("--strategy", action="append", required=True, choices=sorted(STRATEGIES))
     strategy.add_argument("--param", action="append", default=[], help="key=value or strategy.key=value")
 
-    execution = argparse.ArgumentParser(add_help=False)
-    execution.add_argument("--capital", type=float, default=100_000.0)
-    execution.add_argument("--fee-bps", type=float, default=1.0)
-    execution.add_argument("--slippage-bps", type=float, default=1.0, help="simulated slippage")
-    execution.add_argument("--stop-loss", type=float, default=2.0, help="percent, 0 = none")
-    execution.add_argument("--take-profit", type=float, default=5.0, help="percent, 0 = none")
-    execution.add_argument("--max-order", type=int, help="max shares per entry order")
-    execution.add_argument("--max-position", type=int, help="max absolute shares per symbol")
-    execution.add_argument("--max-daily-loss", type=float, help="kill switch, percent of the day's equity")
+    def execution_parser(live: bool) -> argparse.ArgumentParser:
+        # One parser per command: argparse parents share their actions, so defaults set on one command
+        # (the conservative live limits) would leak into the others.
+        execution = argparse.ArgumentParser(add_help=False)
+        execution.add_argument("--capital", type=float, default=100_000.0)
+        execution.add_argument("--fee-bps", type=float, default=1.0)
+        execution.add_argument("--slippage-bps", type=float, default=1.0, help="simulated slippage")
+        execution.add_argument("--max-order", type=int, default=10 if live else None, help="max shares per entry order")
+        execution.add_argument(
+            "--max-position", type=int, default=50 if live else None, help="max absolute shares per symbol"
+        )
+        execution.add_argument(
+            "--max-daily-loss",
+            type=float,
+            default=1.0 if live else None,
+            help="kill switch, percent of the day's equity",
+        )
+        return execution
 
     sessions = argparse.ArgumentParser(add_help=False)
     sessions.add_argument("--sessions-dir", type=Path, default=Path("sessions"))
 
-    p = commands.add_parser("backtest", parents=[data, strategy, execution], help="backtest strategies")
+    p = commands.add_parser(
+        "backtest", parents=[data, strategy, execution_parser(live=False)], help="backtest strategies"
+    )
     p.add_argument("--test-days", type=float, default=5, help="last N calendar days are the test block")
     p.add_argument("--test-fraction", type=float, help="or: the last fraction of the bars")
     p.add_argument("--each", action="store_true", help="with several strategies: also run each alone")
@@ -308,7 +325,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-trades", type=int, default=5)
     p.set_defaults(func=cmd_optimize)
 
-    p = commands.add_parser("paper", parents=[account, strategy, execution, sessions], help="journaled IBKR session")
+    p = commands.add_parser(
+        "paper", parents=[account, strategy, execution_parser(live=True), sessions], help="journaled IBKR session"
+    )
     p.add_argument("--symbol", action="append", required=True)
     p.add_argument("--session", help="name (default: <strategy>_<symbols>_<date>)")
     p.add_argument("--resume", action="store_true", help="resume an interrupted session")
@@ -316,7 +335,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bar-seconds", type=int, default=60)
     p.add_argument("--history", help="IBKR warm-up history, e.g. '2 D' (default per strategy)")
     p.add_argument("--rth", action="store_true", help="regular trading hours only")
-    p.set_defaults(func=cmd_paper, max_order=10, max_position=50, max_daily_loss=1.0)
+    p.set_defaults(func=cmd_paper)
 
     p = commands.add_parser("replay", parents=[sessions], help="replay a session in the backtester")
     p.add_argument("--session", required=True)

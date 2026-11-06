@@ -11,6 +11,7 @@ import pytest
 from quantlab.backtest.metrics import compute_metrics, daily_returns, max_drawdown
 from quantlab.backtest.run import backtest
 from quantlab.execution.broker import FillHandler, StatusHandler
+from quantlab.execution.exits import ExitPlan, Level
 from quantlab.execution.orders import Fill, Order, OrderStatus, OrderType, Side
 from quantlab.execution.portfolio import Portfolio
 from quantlab.execution.risk import RiskLimits, RiskManager
@@ -99,14 +100,33 @@ def test_stop_wins_when_a_bar_touches_both_legs() -> None:
 # --- OrderRouter --------------------------------------------------------------------------------------------
 
 
+def entry(
+    side: Side,
+    quantity: int,
+    strategy_id: str = "s",
+    stop: float | None = 0.02,
+    target: float | None = None,
+    holding: int | None = None,
+    symbol: str = "X",
+) -> Order:
+    """Entry order on X with an exit plan of pct levels."""
+    plan = ExitPlan(
+        stop=Level.pct(stop) if stop else None, target=Level.pct(target) if target else None, holding_bars=holding
+    )
+    return Order(symbol, side, quantity, strategy_id, exit_plan=plan)
+
+
+NO_STOP = RiskLimits(require_stop=False)
+
+
 def make_router(limits: RiskLimits | None = None) -> tuple[OrderRouter, SimulatedBroker]:
     broker = SimulatedBroker(fee_bps=0.0, slippage_bps=0.0)
     return OrderRouter(broker, Portfolio(10_000), RiskManager(limits)), broker
 
 
 def test_entry_places_protective_oca_pair_after_fill() -> None:
-    router, broker = make_router(RiskLimits(stop_loss_pct=0.02, take_profit_pct=0.05))
-    router.submit_entry(Order("X", Side.BUY, 10, "s"), holding_bars=None)
+    router, broker = make_router()
+    router.submit_entry(entry(Side.BUY, 10, stop=0.02, target=0.05))
     broker.on_bar(bar(1, 100, 100.5, 99.5, 100))
     stop, target = sorted(broker.pending_orders, key=lambda o: o.order_type.value)[::-1]
     assert (stop.order_type, stop.stop_price, stop.side, stop.quantity) == (OrderType.STOP, 98.0, Side.SELL, 10)
@@ -123,15 +143,15 @@ def test_entry_places_protective_oca_pair_after_fill() -> None:
 
 
 def test_protective_orders_matched_on_the_entry_bar() -> None:
-    router, broker = make_router(RiskLimits(stop_loss_pct=0.01, take_profit_pct=None))
-    router.submit_entry(Order("X", Side.BUY, 1, "s"), holding_bars=None)
+    router, broker = make_router()
+    router.submit_entry(entry(Side.BUY, 1, stop=0.01))
     broker.on_bar(bar(1, 100, 100.2, 98, 98.5))  # entry at the open, then the bar falls through the stop
     assert [t.reason for t in router.trades] == ["stop_loss"]
 
 
 def test_time_exit_cancels_protective_orders() -> None:
     router, broker = make_router()
-    router.submit_entry(Order("X", Side.SELL, 3, "s"), holding_bars=2)
+    router.submit_entry(entry(Side.SELL, 3, target=0.05, holding=2))
     for i in range(1, 4):
         broker.on_bar(bar(i, 100 + i, 100.5 + i, 99.5 + i, 100 + i))
         router.on_bar_close(T0 + pd.Timedelta(minutes=i))
@@ -143,9 +163,9 @@ def test_time_exit_cancels_protective_orders() -> None:
 
 
 def test_lots_of_several_strategies_are_attributed_separately() -> None:
-    router, broker = make_router(RiskLimits(stop_loss_pct=None, take_profit_pct=None))
-    router.submit_entry(Order("X", Side.BUY, 5, "a"), holding_bars=1)
-    router.submit_entry(Order("X", Side.SELL, 3, "b"), holding_bars=2)
+    router, broker = make_router(NO_STOP)
+    router.submit_entry(entry(Side.BUY, 5, "a", stop=None, holding=1))
+    router.submit_entry(entry(Side.SELL, 3, "b", stop=None, holding=2))
     broker.on_bar(bar(1, 100, 100, 100, 100))
     assert router.portfolio.quantity("X") == 2  # the broker position is the net sum
     for i in (1, 2, 3):
@@ -192,14 +212,14 @@ class ManualBroker:
 
 def test_partial_fills_then_cancel_protect_the_filled_quantity() -> None:
     broker = ManualBroker()
-    router = OrderRouter(broker, Portfolio(), RiskManager(RiskLimits(take_profit_pct=None)))
-    entry = router.submit_entry(Order("X", Side.BUY, 10, "s"), holding_bars=None)
-    assert entry is not None
-    broker.fill(entry, 4, 100.0)
-    broker.fill(entry, 2, 101.0)
+    router = OrderRouter(broker, Portfolio(), RiskManager())
+    sent = router.submit_entry(entry(Side.BUY, 10))
+    assert sent is not None
+    broker.fill(sent, 4, 100.0)
+    broker.fill(sent, 2, 101.0)
     assert len(broker.submitted) == 1  # not protected until the entry is done
     assert broker.on_status is not None
-    broker.on_status(entry.order_id, OrderStatus.CANCELLED, "")
+    broker.on_status(sent.order_id, OrderStatus.CANCELLED, "")
     (lot,) = router.lots.values()
     assert (lot.quantity, lot.entry_price) == (6, pytest.approx((400 + 202) / 6))
     (stop,) = broker.submitted[1:]
@@ -209,19 +229,19 @@ def test_partial_fills_then_cancel_protect_the_filled_quantity() -> None:
 def test_rejected_entry_leaves_no_lot() -> None:
     broker = ManualBroker()
     router = OrderRouter(broker, Portfolio(), RiskManager())
-    entry = router.submit_entry(Order("X", Side.BUY, 10, "s"), holding_bars=5)
-    assert entry is not None and broker.on_status is not None
-    broker.on_status(entry.order_id, OrderStatus.REJECTED, "no permissions")
+    sent = router.submit_entry(entry(Side.BUY, 10, holding=5))
+    assert sent is not None and broker.on_status is not None
+    broker.on_status(sent.order_id, OrderStatus.REJECTED, "no permissions")
     assert router.lots == {} and router.exposure("X") == 0
 
 
 def test_overfill_race_opens_a_correction() -> None:
     """Live race: the stop fills while the time exit is in flight -> the excess is closed at once."""
     broker = ManualBroker()
-    router = OrderRouter(broker, Portfolio(), RiskManager(RiskLimits(take_profit_pct=None)))
-    entry = router.submit_entry(Order("X", Side.BUY, 10, "s"), holding_bars=1)
-    assert entry is not None
-    broker.fill(entry, 10, 100.0)
+    router = OrderRouter(broker, Portfolio(), RiskManager())
+    sent = router.submit_entry(entry(Side.BUY, 10, holding=1))
+    assert sent is not None
+    broker.fill(sent, 10, 100.0)
     stop = broker.submitted[-1]
     router.on_bar_close(T0)  # time exit sent, stop cancel requested
     exit_order = broker.submitted[-1]
@@ -240,24 +260,24 @@ def test_risk_clips_and_refuses_entries() -> None:
     broker = ManualBroker()
     limits = RiskLimits(max_order_quantity=8, max_position_quantity=10)
     router = OrderRouter(broker, Portfolio(), RiskManager(limits))
-    first = router.submit_entry(Order("X", Side.BUY, 20, "s"), holding_bars=5)
+    first = router.submit_entry(entry(Side.BUY, 20))
     assert first is not None and first.quantity == 8
-    second = router.submit_entry(Order("X", Side.BUY, 5, "s"), holding_bars=5)  # pending 8 -> room 2
+    second = router.submit_entry(entry(Side.BUY, 5))  # pending 8 -> room 2
     assert second is not None and second.quantity == 2
-    assert router.submit_entry(Order("X", Side.BUY, 1, "s"), holding_bars=5) is None
-    short = router.submit_entry(Order("X", Side.SELL, 5, "s"), holding_bars=5)  # reduces exposure: allowed
+    assert router.submit_entry(entry(Side.BUY, 1)) is None
+    short = router.submit_entry(entry(Side.SELL, 5))  # reduces exposure: allowed
     assert short is not None and short.quantity == 5
 
 
 def test_kill_switch_halts_and_flattens_on_daily_loss() -> None:
-    router, broker = make_router(RiskLimits(stop_loss_pct=None, take_profit_pct=None, max_daily_loss_pct=0.01))
-    router.submit_entry(Order("X", Side.BUY, 50, "s"), holding_bars=None)
+    router, broker = make_router(RiskLimits(require_stop=False, max_daily_loss_pct=0.01))
+    router.submit_entry(entry(Side.BUY, 50, stop=None))
     router.on_bar_close(T0)  # day start equity = 10 000
     broker.on_bar(bar(1, 100, 100, 100, 100))
     router.portfolio.mark({"X": 97.0})  # -150 = -1.5 %
     router.on_bar_close(T0 + pd.Timedelta(minutes=1))
     assert router.risk.halted
-    assert router.submit_entry(Order("X", Side.BUY, 1, "s"), holding_bars=None) is None
+    assert router.submit_entry(entry(Side.BUY, 1, stop=None)) is None
     broker.on_bar(bar(2, 97, 97, 97, 97))
     assert [t.reason for t in router.trades] == ["kill switch"]
     assert router.portfolio.quantity("X") == 0
@@ -298,10 +318,8 @@ def test_metrics_on_a_known_equity_curve() -> None:
 
 
 class BuyOnce(Strategy):
-    holding_bars = 3
-
     def __init__(self) -> None:
-        super().__init__(symbol="X")
+        super().__init__(symbol="X", holding_bars=3)
         self.fills: list[Fill] = []
 
     def decide(self, bar: pd.Series) -> list[Order]:

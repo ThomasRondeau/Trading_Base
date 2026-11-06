@@ -46,7 +46,11 @@ Soit `z`, le z-score lissé de la barre courante :
 | `z ≥ zscore_threshold` (2,2) | AAPL est cher par rapport à MSFT | **vente** de 10 AAPL et **achat** de 10 MSFT |
 | `z ≤ −zscore_threshold` | AAPL est bon marché par rapport à MSFT | **achat** de 10 AAPL et **vente** de 10 MSFT |
 
-Chaque jambe est un ordre distinct, qui ouvre son propre **lot** dans l'`OrderRouter`. Chaque lot a sa paire d'ordres protecteurs (stop −2 %, objectif +5 %) et sa sortie au temps après 5 barres. Les deux jambes sont donc normalement fermées ensemble, après 5 barres, mais un stop peut fermer une seule jambe et laisser l'autre ouverte.
+Les deux jambes forment un **groupe** de lots dans l'`OrderRouter` (`Strategy.group`) :
+
+- elles passent le contrôle de risque **ensemble ou pas du tout**, donc jamais de paire déséquilibrée ;
+- elles sortent **ensemble** : quand le z-score revient dans `±exit_zscore` (0,5, sortie demandée par la stratégie), après `holding_bars` (5), ou quand le **P&L combiné** atteint −`stop_loss_pct` (2 %) ou +`take_profit_pct` (5 %) du notionnel brut de la paire. Ce contrôle a lieu à chaque clôture de barre ;
+- chaque jambe porte un **stop large chez le broker** (`leg_stop_pct`, 5 %), qui la protège si l'application tombe. S'il s'exécute, l'autre jambe est fermée aussitôt. Si une jambe n'est pas exécutée (rejet), l'autre est fermée.
 
 Comme la stratégie ne fait pas de gestion de position, un z-score qui reste au-delà du seuil génère une nouvelle paire à chaque barre. Les lots s'empilent, dans la limite des `RiskLimits` (`max_position_quantity`) en live.
 
@@ -60,6 +64,10 @@ Il n'y a pas de modèle ML ni de cible : la règle est purement statistique. Une
 | `zscore_threshold` | 2,2 | `--param zscore_threshold=2.0` |
 | `zscore_window` | 30 | `--param zscore_window=60` |
 | `smoothing_window` | 3 | `--param smoothing_window=5` |
+| `exit_zscore` | 0,5 | `--param exit_zscore=none` (pas de sortie sur le z-score) |
+| `leg_stop_pct` | 5 | `--param leg_stop_pct=8` |
+| `stop_loss_pct`, `take_profit_pct` | 2, 5 | en % du notionnel brut de la paire |
+| `holding_bars` | 5 | `--param holding_bars=30` |
 
 ```bash
 py -3.10 -m quantlab backtest --strategy pair --symbol AAPL --symbol MSFT --source yfinance --days 55

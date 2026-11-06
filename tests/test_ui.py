@@ -65,7 +65,10 @@ def test_backtest_page_runs_on_a_file(tmp_path: Path) -> None:
 def test_strategy_parameters_are_introspected() -> None:
     from quantlab.ui.app import parse_extra, strategy_signature
 
-    assert strategy_signature("trend") == {"sma_fast": 5, "sma_slow": 20}
+    exits = {"stop_loss_pct": 2.0, "take_profit_pct": 5.0, "stop_atr": None, "take_profit_atr": None,
+             "atr_window": 14, "holding_bars": 5}  # fmt: skip
+    assert strategy_signature("trend") == {"sma_fast": 5, "sma_slow": 20, **exits}
+    assert {"exit_zscore", "leg_stop_pct"} <= set(strategy_signature("pair"))
     assert strategy_signature("arima")["order"] == (2, 1, 0)
     assert "zscore_threshold" in strategy_signature("pair")
     assert parse_extra("sma_fast=10\n\nk=1.5") == {"sma_fast": 10, "k": 1.5}

@@ -9,6 +9,8 @@ from typing import Any
 
 import pandas as pd
 
+from quantlab.execution.exits import ExitPlan
+
 
 class Side(str, Enum):
     BUY = "BUY"
@@ -54,6 +56,10 @@ class Order:
     #: orders sharing an OCA ("one cancels all") group: the first fill cancels the others
     oca_group: str | None = None
     order_id: str = field(default_factory=_new_order_id)
+    #: entries only: how the lot opened by this order is closed (None: the router's empty plan)
+    exit_plan: ExitPlan | None = None
+    #: entries only: orders sharing a group (the legs of a pair) are risk-checked and closed together
+    group_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.quantity <= 0:
@@ -66,11 +72,16 @@ class Order:
             raise ValueError("A stop order needs a stop_price.")
 
     def to_dict(self) -> dict[str, Any]:
-        return {**asdict(self), "side": self.side.value, "order_type": self.order_type.value}
+        return {
+            **asdict(self),
+            "side": self.side.value,
+            "order_type": self.order_type.value,
+            "exit_plan": self.exit_plan.to_dict() if self.exit_plan else None,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Order:
-        return cls(**data)
+        return cls(**{**data, "exit_plan": ExitPlan.from_dict(data.get("exit_plan"))})
 
 
 @dataclass(frozen=True)

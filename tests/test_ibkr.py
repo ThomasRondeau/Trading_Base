@@ -352,10 +352,8 @@ def test_feed_raises_when_tws_refuses_real_time_bars() -> None:
 
 
 class BuyFirstBar(Strategy):
-    holding_bars = 1
-
     def __init__(self) -> None:
-        super().__init__(symbol="AAPL")
+        super().__init__(symbol="AAPL", take_profit_pct=None, holding_bars=1)
         self.done = False
 
     def decide(self, bar: pd.Series) -> list[Order]:
@@ -373,7 +371,7 @@ def test_runner_on_ibkr_paper_end_to_end() -> None:
     strategy = BuyFirstBar()
     strategy.fit(feed.history())
     broker = IBKRBroker(client)
-    runner = StrategyRunner([strategy], broker, RiskManager(RiskLimits(take_profit_pct=None)))
+    runner = StrategyRunner([strategy], broker, RiskManager(RiskLimits()))
     thread = threading.Thread(target=runner.run, args=(feed,), daemon=True)
     thread.start()
 

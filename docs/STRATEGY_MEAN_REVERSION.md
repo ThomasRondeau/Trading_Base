@@ -26,13 +26,15 @@ Il faut que le prix **dépasse franchement** la bande, et pas seulement qu'il la
   - RSI > 100 − `rsi_threshold` (70) ;
   - ratio de volume > 1,2.
 
-Le pic de volume sert d'indice d'un climax d'achat ou de vente. La sortie ne se fait pas sur la moyenne centrale : c'est l'`OrderRouter` qui ferme la position. Il le fait après 5 barres (`holding_bars`), ou plus tôt si le stop loss à −2 % ou le take profit à +5 %, placés chez le broker, est touché.
+Le pic de volume sert d'indice d'un climax d'achat ou de vente. Par défaut, la sortie ne se fait pas sur la moyenne centrale : c'est l'`OrderRouter` qui ferme la position. Il le fait après 5 barres (`holding_bars`), ou plus tôt si le stop loss à −2 % ou le take profit à +5 % (`stop_loss_pct`, `take_profit_pct`), placés chez le broker, est touché. Avec `target_middle_band=true`, l'objectif de chaque position devient la bande de Bollinger médiane au moment du signal : c'est la moyenne vers laquelle le prix est censé revenir.
 
 ## 3. Paramètres
 
 | Paramètre | Défaut | Exemple |
 |---|---|---|
 | `rsi_threshold` | 30 | `--param rsi_threshold=25` |
+| `target_middle_band` | false | `--param target_middle_band=true` |
+| sorties (`stop_loss_pct`, `take_profit_pct`, `stop_atr`, `holding_bars`…) | 2, 5, aucun, 5 | `--param stop_atr=1.5` |
 
 Les fenêtres des indicateurs, le multiplicateur d'ATR (0,2) et le seuil de volume (1,2) sont fixés dans le code.
 

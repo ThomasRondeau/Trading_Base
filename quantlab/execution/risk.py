@@ -1,7 +1,9 @@
 """
 Pre-trade risk checks and the kill switch, applied by the `OrderRouter` to every entry order.
 
-Exits (time exits, protective stops / targets, flattening) are never blocked.
+Exits (time exits, protective stops / targets, flattening) are never blocked. The stop, target and
+holding period of each position are not risk limits: they belong to the entry's `ExitPlan`, decided by
+the strategy (`execution/exits.py`). The limits here protect the account.
 """
 
 from __future__ import annotations
@@ -21,9 +23,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RiskLimits:
-    #: protective stop / target placed at the broker after each entry fill (fraction of the fill price)
-    stop_loss_pct: float | None = 0.02
-    take_profit_pct: float | None = 0.05
+    #: refuse every entry whose exit plan has no stop
+    require_stop: bool = True
     #: entry orders are clipped to this quantity
     max_order_quantity: int | None = None
     #: absolute net position per symbol (including pending entries) that entries may not exceed

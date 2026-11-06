@@ -48,14 +48,14 @@
     "win_rate": 38.70967741935484
   },
   "pair_trading": {
-    "avg_trade_return_pct": 0.05672711709261694,
+    "avg_trade_return_pct": 0.05621213428636211,
     "max_drawdown_pct": -0.10098613321911774,
-    "profit_factor": 1.3584843794249115,
-    "sharpe_ratio": 22.82565945229801,
+    "profit_factor": 1.3511515322508956,
+    "sharpe_ratio": 22.46111454980022,
     "sortino_ratio": 0.0,
-    "total_fees": 48.43925193999634,
-    "total_pnl_net": 81.43631367279943,
-    "total_return_pct": 0.08143631367276694,
+    "total_fees": 48.439475314804085,
+    "total_pnl_net": 79.77052270155585,
+    "total_return_pct": 0.07977052270151663,
     "total_trades": 56.0,
     "win_rate": 42.857142857142854
   },

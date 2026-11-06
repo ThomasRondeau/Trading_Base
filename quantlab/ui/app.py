@@ -32,6 +32,7 @@ from quantlab.cli import parse_value  # noqa: E402
 from quantlab.config import ACCOUNTS, IBKRSettings  # noqa: E402
 from quantlab.data import loading  # noqa: E402
 from quantlab.execution.risk import RiskLimits  # noqa: E402
+from quantlab.strategies.base import EXIT_PARAMS, Strategy  # noqa: E402
 from quantlab.strategies.registry import STRATEGIES, build_strategy  # noqa: E402
 from quantlab.ui import charts  # noqa: E402
 
@@ -59,14 +60,61 @@ SESSIONS_DIR = Path("sessions")
 # --- shared widgets ----------------------------------------------------------------------------------------
 
 
+#: exit parameters of every strategy (base class): label, help, kind; 0 disables a level or the time exit
+EXIT_WIDGETS: dict[str, tuple[str, str, type]] = {
+    "stop_loss_pct": ("Stop (% du prix d'entrée)", "0 = aucun stop : l'entrée est alors refusée.", float),
+    "take_profit_pct": ("Objectif (% du prix d'entrée)", "0 = aucun objectif.", float),
+    "holding_bars": ("Durée max (barres)", "Clôture au marché après ce nombre de barres ; 0 = aucune.", int),
+    "stop_atr": (
+        "Stop en ATR",
+        "Distance du stop en multiples d'ATR, mesurée au signal ; remplace le %. 0 = non.",
+        float,
+    ),
+    "take_profit_atr": (
+        "Objectif en ATR",
+        "Distance de l'objectif en multiples d'ATR ; remplace le %. 0 = non.",
+        float,
+    ),
+    "atr_window": ("Fenêtre de l'ATR", "Barres de l'ATR utilisé par les niveaux en ATR.", int),
+}
+#: strategies whose stop / target apply to a group (pair: combined P&L, no ATR level)
+GROUP_STRATEGIES = {"pair"}
+
+
 def strategy_signature(name: str) -> dict[str, Any]:
-    """Tunable constructor parameters of a strategy and their defaults."""
+    """Tunable constructor parameters of a strategy (its own, then the exit parameters) and their defaults."""
     params: dict[str, Any] = {}
-    for param in inspect.signature(STRATEGIES[name].factory).parameters.values():
-        if param.name in EXCLUDED_PARAMS or param.kind in (param.VAR_KEYWORD, param.VAR_POSITIONAL):
-            continue
-        params[param.name] = None if param.default is inspect.Parameter.empty else param.default
+    signatures = (inspect.signature(STRATEGIES[name].factory), inspect.signature(Strategy.__init__))
+    for signature in signatures:
+        for param in signature.parameters.values():
+            if param.name in EXCLUDED_PARAMS or param.kind in (param.VAR_KEYWORD, param.VAR_POSITIONAL):
+                continue
+            params.setdefault(param.name, None if param.default is inspect.Parameter.empty else param.default)
     return params
+
+
+def exit_inputs(key: str, group: bool = False) -> dict[str, Any]:
+    """Exit parameters (stop, target, holding period); only values that differ from the default are returned."""
+    defaults = inspect.signature(Strategy.__init__).parameters
+    names = [n for n in EXIT_WIDGETS if not (group and n in ("stop_atr", "take_profit_atr", "atr_window"))]
+    chosen: dict[str, Any] = {}
+    columns = st.columns(3)
+    for i, param in enumerate(names):
+        label, help_text, kind = EXIT_WIDGETS[param]
+        if group and param in ("stop_loss_pct", "take_profit_pct"):
+            label = label.replace("du prix d'entrée", "du notionnel de la paire")
+        default = defaults[param].default or 0
+        widget_key = f"{key}_exit_{param}"
+        with columns[i % 3]:
+            if kind is int:
+                value: Any = int(st.number_input(label, min_value=0, value=int(default), step=1, key=widget_key,
+                                                 help=help_text))  # fmt: skip
+            else:
+                value = float(st.number_input(label, min_value=0.0, value=float(default), format="%g",
+                                              key=widget_key, help=help_text))  # fmt: skip
+        if value != default:
+            chosen[param] = value
+    return chosen
 
 
 def parse_extra(text: str) -> dict[str, Any]:
@@ -86,7 +134,7 @@ def parse_extra(text: str) -> dict[str, Any]:
 def param_inputs(name: str, key: str) -> dict[str, Any]:
     """Inputs for every parameter of a strategy; only values that differ from the default are returned."""
     chosen: dict[str, Any] = {}
-    defaults = strategy_signature(name)
+    defaults = {k: v for k, v in strategy_signature(name).items() if k not in EXIT_PARAMS}
     columns = st.columns(3)
     for i, (param, default) in enumerate(defaults.items()):
         with columns[i % 3]:
@@ -102,6 +150,12 @@ def param_inputs(name: str, key: str) -> dict[str, Any]:
                 value = ast.literal_eval(raw) if raw.strip() else default
             if value != default:
                 chosen[param] = value
+    group = name in GROUP_STRATEGIES
+    st.markdown(
+        "**Sorties** (par position)"
+        + (" : stop et objectif sur le P&L combiné des deux jambes, clôturées ensemble" if group else "")
+    )
+    chosen.update(exit_inputs(f"{key}_{name}", group=group))
     extra = st.text_area(
         "Autres paramètres (clé=valeur, un par ligne)", key=f"{key}_{name}_extra", height=68, placeholder="sma_fast=10"
     )
@@ -155,9 +209,7 @@ def execution_inputs(key: str, live: bool = False) -> dict[str, Any]:
         capital = c1.number_input("Capital ($)", min_value=1.0, value=100_000.0, step=10_000.0, key=f"{key}_capital")
         fee_bps = c2.number_input("Frais (bp par côté)", min_value=0.0, value=1.0, key=f"{key}_fee")
         slippage_bps = c3.number_input("Slippage simulé (bp)", min_value=0.0, value=1.0, key=f"{key}_slip")
-        c1, c2 = st.columns(2)
-        stop_loss = c1.number_input("Stop loss (%, 0 = aucun)", min_value=0.0, value=2.0, key=f"{key}_sl")
-        take_profit = c2.number_input("Take profit (%, 0 = aucun)", min_value=0.0, value=5.0, key=f"{key}_tp")
+        st.caption("Stop, objectif et durée de détention sont des paramètres de chaque stratégie (section Sorties).")
         c1, c2, c3 = st.columns(3)
         max_order = c1.number_input(
             "Max actions par ordre (0 = illimité)", min_value=0, value=10 if live else 0, key=f"{key}_maxo"
@@ -173,8 +225,6 @@ def execution_inputs(key: str, live: bool = False) -> dict[str, Any]:
         "fee_bps": float(fee_bps),
         "slippage_bps": float(slippage_bps),
         "risk": RiskLimits(
-            stop_loss_pct=stop_loss / 100 or None,
-            take_profit_pct=take_profit / 100 or None,
             max_order_quantity=int(max_order) or None,
             max_position_quantity=int(max_position) or None,
             max_daily_loss_pct=max_loss / 100 or None,
@@ -244,7 +294,7 @@ def page_backtest() -> None:
     st.header("Backtest")
     st.caption(
         "Entraîne les stratégies sur le début des données puis les fait trader barre par barre sur la fin, "
-        "avec le même moteur que le live (exécution à l'open suivant, frais, slippage, stop / objectif)."
+        "avec le même moteur que le live (exécution à l'open suivant, frais, slippage, stop / objectif par position)."
     )
     names = st.multiselect(
         "Stratégie(s)",
@@ -437,7 +487,9 @@ def page_live() -> None:
         c1, c2 = st.columns(2)
         bar_seconds = int(c1.number_input("Durée des barres (s)", min_value=5, value=60, step=5))
         history = c2.text_input("Historique de préchauffage IBKR", placeholder="défaut selon la stratégie, ex. 2 D")
-        params_text = st.text_area("Paramètres de la stratégie (clé=valeur)", height=68)
+        st.markdown("**Sorties** (par position ; pour le pair trading : sur le P&L combiné, sans ATR)")
+        exits = exit_inputs("live")
+        params_text = st.text_area("Autres paramètres de la stratégie (clé=valeur)", height=68)
         execution = execution_inputs("live", live=True)
         st.markdown("**Compte réel** : jamais par défaut.")
         c1, c2 = st.columns(2)
@@ -459,7 +511,8 @@ def page_live() -> None:
                 fee_bps=execution["fee_bps"],
                 slippage_bps=execution["slippage_bps"],
             )
-            registry.start(session, SESSIONS_DIR / session, name, symbols, parse_extra(params_text), config,
+            params = {**exits, **parse_extra(params_text)}
+            registry.start(session, SESSIONS_DIR / session, name, symbols, params, config,
                            resume=resume, allow_live=allow_live, confirm_account=confirm,
                            account=account)  # fmt: skip
             st.success(f"Session {session} lancée.")

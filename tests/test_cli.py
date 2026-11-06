@@ -18,6 +18,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 def test_parse_value() -> None:
     assert [parse_value(v) for v in ("10", "2.5", "true", "False", "AAPL")] == [10, 2.5, True, False, "AAPL"]
+    assert parse_value("none") is None
 
 
 def test_parse_params_global_and_targeted() -> None:
@@ -55,6 +56,18 @@ def test_registry_builds_every_strategy() -> None:
 def test_paper_defaults_are_conservative() -> None:
     args = build_parser().parse_args(["paper", "--strategy", "trend", "--symbol", "AAPL"])
     assert (args.max_order, args.max_position, args.max_daily_loss, args.live) == (10, 50, 1.0, False)
+    # ...without leaking into the backtest (argparse parents share their actions)
+    args = build_parser().parse_args(["backtest", "--strategy", "trend", "--symbol", "AAPL"])
+    assert (args.max_order, args.max_position, args.max_daily_loss) == (None, None, None)
+
+
+def test_exits_are_strategy_parameters() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["backtest", "--strategy", "trend", "--symbol", "AAPL", "--stop-loss", "1"])
+    params = parse_params(["trend.stop_atr=1.5", "holding_bars=none"], ["trend", "mean_reversion"])
+    trend = build_strategy("trend", ["AAPL"], params["trend"])
+    reversion = build_strategy("mean_reversion", ["AAPL"], params["mean_reversion"])
+    assert (trend.stop_atr, trend.holding_bars, reversion.stop_atr, reversion.holding_bars) == (1.5, None, None, None)
 
 
 def test_backtest_command_writes_trades_and_equity(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

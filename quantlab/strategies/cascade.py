@@ -29,7 +29,7 @@ class CascadeStrategy(Strategy):
     A trade is taken only when the three agree and the predicted amplitude is large enough.
     """
 
-    def __init__(self, min_amplitude_threshold: float = 0.05, symbol: str = "AAPL", **kwargs: str) -> None:
+    def __init__(self, min_amplitude_threshold: float = 0.05, symbol: str = "AAPL", **kwargs: Any) -> None:
         """
         :param min_amplitude_threshold: minimum predicted amplitude to trade, in percent (same unit as the
                                         `return_pct` and `move` targets).

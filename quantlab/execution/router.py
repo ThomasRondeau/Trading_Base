@@ -1,11 +1,18 @@
 """
 Order routing shared by backtest and live: risk checks, trade lifecycle and fill attribution.
 
-Every entry order a strategy emits opens a *lot* owned by that strategy. Once the entry is filled, the
-router places the lot's protective orders at the broker (an OCA pair: stop loss + take profit, from the
-`RiskLimits`), so they keep working if the process dies. After `holding_bars` bars it cancels them and
-closes the lot at market. Several strategies may hold lots on the same symbol: the broker position is
-their net sum, and each lot's exit moves it by exactly that lot's quantity.
+Every entry order a strategy emits opens a *lot* owned by that strategy, with the entry's `ExitPlan`
+frozen into it (`execution/exits.py`). Once the entry is filled, the router places the lot's protective
+orders at the broker (an OCA pair: the plan's stop + target, anchored at the fill price), so they keep
+working if the process dies. After the plan's `holding_bars` it cancels them and closes the lot at
+market. A strategy may also ask to close its own lots (`exit_strategy`). Several strategies may hold
+lots on the same symbol: the broker position is their net sum, and each lot's exit moves it by exactly
+that lot's quantity.
+
+Entries sharing a `group_id` (the legs of a pair) form a group: risk-checked all or nothing, closed
+together. The group's stop / target apply to its combined P&L and are checked at each bar close; each
+leg only carries the plan's wide `leg_stop` at the broker, and when one leg is closed (leg stop, entry
+not filled) the others are closed too.
 
 Fills are attributed to lots through the order ids. A live race (a protective order filling while the
 time exit is in flight) can over-close a lot: the excess becomes a new lot that is closed at once.
@@ -15,7 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -23,6 +30,7 @@ from typing import Any
 import pandas as pd
 
 from quantlab.execution.broker import Broker
+from quantlab.execution.exits import ExitPlan
 from quantlab.execution.orders import Fill, Order, OrderStatus, OrderType, Side
 from quantlab.execution.portfolio import Portfolio
 from quantlab.execution.risk import RiskManager
@@ -51,6 +59,10 @@ class Trade:
     fees: float
     bars_held: int
     reason: str
+    group_id: str | None = None
+    #: protective levels actually placed (None: no such order)
+    stop_price: float | None = None
+    target_price: float | None = None
 
     @property
     def pnl(self) -> float:
@@ -72,8 +84,9 @@ class Lot:
     strategy_id: str
     symbol: str
     side: Side
-    holding_bars: int | None
+    plan: ExitPlan = field(default_factory=ExitPlan)
     entry_order_id: str = ""
+    group_id: str | None = None
     quantity: int = 0  # still open
     entry_quantity: int = 0
     entry_price: float = 0.0  # average fill price
@@ -87,12 +100,17 @@ class Lot:
     bars_held: int = 0
     protective_ids: set[str] = field(default_factory=set)
     exit_order_id: str | None = None
+    stop_price: float | None = None
+    target_price: float | None = None
+    #: reason of a requested close (strategy signal, group exit, flatten): the lot exits as soon as it can
+    close_requested: str = ""
 
     _TIMES = ("entry_time", "exit_time")
 
     def to_dict(self) -> dict[str, Any]:
         data = dataclasses.asdict(self)
         data["side"] = self.side.value
+        data["plan"] = self.plan.to_dict()
         data["protective_ids"] = sorted(self.protective_ids)
         for key in self._TIMES:
             data[key] = data[key].isoformat() if data[key] is not None else None
@@ -101,6 +119,9 @@ class Lot:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Lot:
         data = dict(data, side=Side(data["side"]), protective_ids=set(data["protective_ids"]))
+        if "holding_bars" in data:  # state saved before exit plans: its stops are already at the broker
+            data["plan"] = {"holding_bars": data.pop("holding_bars")}
+        data["plan"] = ExitPlan.from_dict(data["plan"]) or ExitPlan()
         for key in cls._TIMES:
             data[key] = pd.Timestamp(data[key]) if data[key] is not None else None
         return cls(**data)
@@ -145,15 +166,45 @@ class OrderRouter:
         )
         return self.portfolio.quantity(symbol) + pending
 
-    def submit_entry(self, order: Order, holding_bars: int | None) -> Order | None:
+    def submit_entries(self, orders: Sequence[Order]) -> list[Order | None]:
+        """`submit_entry` of each order, groups (same `group_id`) all or nothing; the orders sent, in order."""
+        sent: dict[str, Order | None] = {}
+        groups: dict[str, list[Order]] = {}
+        for order in orders:
+            if order.group_id is None:
+                sent[order.order_id] = self.submit_entry(order)
+            else:
+                groups.setdefault(order.group_id, []).append(order)
+        for legs in groups.values():
+            for leg, result in zip(legs, self._submit_group(legs), strict=True):
+                sent[leg.order_id] = result
+        return [sent[order.order_id] for order in orders]
+
+    def submit_entry(self, order: Order) -> Order | None:
         """Risk-check `order` and send it; returns the order actually sent (None if refused)."""
+        if order.group_id is not None:
+            return self._submit_group([order])[0]
+        plan = order.exit_plan or ExitPlan()
+        if not self._stop_ok(order, plan):
+            return None
         checked = self.risk.check_entry(order, self.exposure(order.symbol))
         if checked is None:
             return None
-        lot = Lot(self._next_lot_id(), order.strategy_id, order.symbol, order.side, holding_bars, checked.order_id)
-        self.lots[lot.lot_id] = lot
-        self._send(checked, Role.ENTRY, lot.lot_id)
+        self._open(checked, plan)
         return checked
+
+    def exit_strategy(self, strategy_id: str, symbol: str | None = None, reason: str = "signal") -> int:
+        """Close the lots of a strategy (on `symbol` only, if given; groups as a whole); returns their count."""
+        lots = [
+            lot
+            for lot in self.lots.values()
+            if lot.strategy_id == strategy_id and (symbol is None or lot.symbol == symbol) and not lot.close_requested
+        ]
+        groups = {lot.group_id for lot in lots if lot.group_id is not None}
+        lots += [lot for lot in self.lots.values() if lot.group_id in groups and lot not in lots]
+        for lot in lots:
+            self._request_close(lot, reason)
+        return len(lots)
 
     # --- broker events ---------------------------------------------------------------------------------
 
@@ -178,7 +229,12 @@ class OrderRouter:
                 lot.entry_done = True
                 self._protect(lot)
         else:
+            group_id = lot.group_id
             self._reduce(lot, fill, tracked.reason)
+            if tracked.role is Role.EXIT and tracked.remaining <= 0 and lot.lot_id in self.lots:
+                lot.exit_order_id = None  # entry fills arrived after the exit: exited again at the next bar close
+            if tracked.role is Role.PROTECT and group_id is not None:
+                self._close_group(group_id, tracked.reason)  # a leg was stopped out: close the other legs
         for listener in self.fill_listeners:
             listener(fill)
 
@@ -199,6 +255,8 @@ class OrderRouter:
                 self._close(lot)
             else:
                 del self.lots[lot.lot_id]
+                if lot.group_id is not None:
+                    self._close_group(lot.group_id, "leg_missing")  # a pair without one leg is not a pair
         elif tracked.role is Role.PROTECT:
             lot.protective_ids.discard(order_id)
         elif tracked.role is Role.EXIT and lot.exit_order_id == order_id:
@@ -211,18 +269,24 @@ class OrderRouter:
             if lot.quantity <= 0:
                 continue
             lot.bars_held += 1
-            if lot.holding_bars is not None and lot.bars_held >= lot.holding_bars and lot.exit_order_id is None:
-                self._exit(lot, "time")
+            if lot.exit_order_id is not None:
+                continue
+            holding = lot.plan.holding_bars
+            if lot.close_requested:
+                self._exit(lot, lot.close_requested)
+            elif holding is not None and lot.bars_held >= holding:
+                if lot.group_id is not None:
+                    self._close_group(lot.group_id, "time")
+                else:
+                    self._exit(lot, "time")
+        self._check_groups()
         if self.risk.on_equity(timestamp, self.portfolio.equity) and self.risk.limits.flatten_on_halt:
             self.flatten("kill switch")
 
     def flatten(self, reason: str) -> None:
         """Cancel pending entries and close every open lot at market."""
         for lot in list(self.lots.values()):
-            if not lot.entry_done:
-                self.broker.cancel(lot.entry_order_id)
-            if lot.quantity > 0 and lot.exit_order_id is None:
-                self._exit(lot, reason)
+            self._request_close(lot, reason)
 
     def open_trades(self, prices: dict[str, float], timestamp: pd.Timestamp) -> list[Trade]:
         """Open lots as trades marked at `prices` (end of a backtest); nothing is sent."""
@@ -270,24 +334,107 @@ class OrderRouter:
     def _round(self, price: float) -> float:
         return round(round(price / self.tick_size) * self.tick_size, 10)
 
+    def _stop_ok(self, order: Order, plan: ExitPlan) -> bool:
+        if self.risk.limits.require_stop and plan.stop is None:
+            logger.warning("Entry refused, its exit plan has no stop (RiskLimits.require_stop): %s", order)
+            return False
+        return True
+
+    def _open(self, order: Order, plan: ExitPlan) -> None:
+        lot = Lot(
+            self._next_lot_id(), order.strategy_id, order.symbol, order.side, plan, order.order_id, order.group_id
+        )
+        self.lots[lot.lot_id] = lot
+        self._send(order, Role.ENTRY, lot.lot_id)
+
+    def _submit_group(self, legs: Sequence[Order]) -> list[Order | None]:
+        plan = legs[0].exit_plan or ExitPlan()
+        plan.check_group()
+        refused: list[Order | None] = [None] * len(legs)
+        if not self._stop_ok(legs[0], plan):
+            return refused
+        checked = [self.risk.check_entry(leg, self.exposure(leg.symbol)) for leg in legs]
+        if any(c is None or c.quantity != leg.quantity for c, leg in zip(checked, legs, strict=True)):
+            logger.warning("Group %s refused: every leg must pass the risk checks unchanged", legs[0].group_id)
+            return refused
+        for leg in legs:
+            self._open(leg, plan)
+        return list(legs)
+
+    def _group(self, group_id: str) -> list[Lot]:
+        return [lot for lot in self.lots.values() if lot.group_id == group_id]
+
+    def _close_group(self, group_id: str, reason: str) -> None:
+        for lot in self._group(group_id):
+            if not lot.close_requested:
+                self._request_close(lot, reason)
+
+    def _check_groups(self) -> None:
+        """Combined stop / target of each group, on the bar close prices."""
+        prices = self.portfolio.last_prices
+        for group_id in sorted({lot.group_id for lot in self.lots.values() if lot.group_id is not None}):
+            legs = self._group(group_id)
+            plan = legs[0].plan
+            if plan.stop is None and plan.target is None:
+                continue
+            if any(not lot.entry_done or lot.close_requested for lot in legs):
+                continue
+            if any(lot.quantity > 0 and lot.symbol not in prices for lot in legs):
+                continue
+            notional = sum(lot.entry_price * lot.entry_quantity for lot in legs)
+            pnl = sum(lot.side.sign * (prices[lot.symbol] - lot.entry_price) * lot.quantity for lot in legs)
+            if notional <= 0:
+                continue
+            if plan.stop is not None and pnl <= -plan.stop.value * notional:
+                self._close_group(group_id, "stop_loss")
+            elif plan.target is not None and pnl >= plan.target.value * notional:
+                self._close_group(group_id, "take_profit")
+
+    def _request_close(self, lot: Lot, reason: str) -> None:
+        lot.close_requested = lot.close_requested or reason
+        if not lot.entry_done:
+            self.broker.cancel(lot.entry_order_id)
+        if lot.quantity > 0 and lot.exit_order_id is None:
+            self._exit(lot, lot.close_requested)
+
     def _protect(self, lot: Lot) -> None:
         if lot.quantity <= 0 or lot.exit_order_id is not None:
             return
-        limits, sign, exit_side = self.risk.limits, lot.side.sign, lot.side.opposite
+        if lot.close_requested:  # closed while its entry was still filling
+            self._exit(lot, lot.close_requested)
+            return
+        plan, sign, exit_side = lot.plan, lot.side.sign, lot.side.opposite
         oca = f"oca-{lot.entry_order_id}"
         protective: list[tuple[Order, str]] = []
-        if limits.stop_loss_pct is not None:
-            stop = self._round(lot.entry_price * (1 - sign * limits.stop_loss_pct))
-            protective.append(
-                (Order(lot.symbol, exit_side, lot.quantity, lot.strategy_id, OrderType.STOP, stop_price=stop,
-                       oca_group=oca), "stop_loss")
-            )  # fmt: skip
-        if limits.take_profit_pct is not None:
-            target = self._round(lot.entry_price * (1 + sign * limits.take_profit_pct))
-            protective.append(
-                (Order(lot.symbol, exit_side, lot.quantity, lot.strategy_id, OrderType.LIMIT, limit_price=target,
-                       oca_group=oca), "take_profit")
-            )  # fmt: skip
+        if lot.group_id is not None:  # the group's own levels are checked on its combined P&L
+            if plan.leg_stop is not None:
+                lot.stop_price = self._round(lot.entry_price * (1 - sign * plan.leg_stop))
+                protective.append(
+                    (Order(lot.symbol, exit_side, lot.quantity, lot.strategy_id, OrderType.STOP,
+                           stop_price=lot.stop_price, oca_group=oca), "leg_stop")
+                )  # fmt: skip
+        else:
+            if plan.stop is not None:
+                lot.stop_price = self._round(plan.stop.price(lot.entry_price, -sign))
+            if plan.target is not None:
+                lot.target_price = self._round(plan.target.price(lot.entry_price, sign))
+            # an absolute level the fill already went through (gap): close at market now
+            if lot.stop_price is not None and sign * (lot.entry_price - lot.stop_price) <= 0:
+                self._exit(lot, "stop_gap")
+                return
+            if lot.target_price is not None and sign * (lot.target_price - lot.entry_price) <= 0:
+                self._exit(lot, "target_gap")
+                return
+            if lot.stop_price is not None:
+                protective.append(
+                    (Order(lot.symbol, exit_side, lot.quantity, lot.strategy_id, OrderType.STOP,
+                           stop_price=lot.stop_price, oca_group=oca), "stop_loss")
+                )  # fmt: skip
+            if lot.target_price is not None:
+                protective.append(
+                    (Order(lot.symbol, exit_side, lot.quantity, lot.strategy_id, OrderType.LIMIT,
+                           limit_price=lot.target_price, oca_group=oca), "take_profit")
+                )  # fmt: skip
         for order, reason in protective:
             lot.protective_ids.add(order.order_id)
             self._send(order, Role.PROTECT, lot.lot_id, reason)
@@ -341,11 +488,14 @@ class OrderRouter:
             fees=lot.fees,
             bars_held=lot.bars_held,
             reason=reason,
+            group_id=lot.group_id,
+            stop_price=lot.stop_price,
+            target_price=lot.target_price,
         )
 
     def _open_correction(self, symbol: str, side: Side, quantity: int, fill: Fill) -> None:
         """Unintended shares (over-fill): track them as a lot and close it immediately."""
-        lot = Lot(self._next_lot_id(), fill.order.strategy_id, symbol, side, holding_bars=0, entry_done=True)
+        lot = Lot(self._next_lot_id(), fill.order.strategy_id, symbol, side, entry_done=True)
         lot.quantity = lot.entry_quantity = quantity
         lot.entry_price, lot.entry_time = fill.price, fill.timestamp
         self.lots[lot.lot_id] = lot

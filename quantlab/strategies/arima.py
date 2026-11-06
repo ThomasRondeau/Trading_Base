@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pandas as pd
 
 from quantlab.execution.orders import Order, Side
@@ -16,7 +18,7 @@ class ArimaStrategy(Strategy):
         min_edge_bps: float = 2.0,
         window: int = 50,
         symbol: str = "AAPL",
-        **kwargs: str,
+        **kwargs: Any,
     ) -> None:
         """
         :param order: ARIMA (p, d, q) order.

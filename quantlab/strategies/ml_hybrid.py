@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class MLHybridStrategy(Strategy):
     """Mean reversion entries (Bollinger + RSI + volume) confirmed by an XGBoost 5-bar direction model."""
 
-    def __init__(self, max_depth: int = 4, symbol: str = "AAPL", **kwargs: str) -> None:
+    def __init__(self, max_depth: int = 4, symbol: str = "AAPL", **kwargs: Any) -> None:
         super().__init__(symbol=symbol, **kwargs)
         self.training_data_shift = 30
         self.bollinger, self.rsi, self.volume = BollingerBands(20, 2), RSI(14), VolumeRatio(20)

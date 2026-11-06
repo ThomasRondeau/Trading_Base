@@ -30,7 +30,8 @@ from quantlab.strategies.mean_reversion import MeanReversionStrategy
 from quantlab.strategies.trend_following import TrendFollowingStrategy
 
 FIXTURES = Path(__file__).parent / "fixtures"
-RISK = RiskLimits(stop_loss_pct=0.002, take_profit_pct=0.004)  # tight: exercises the protective orders
+RISK = RiskLimits()
+EXITS = {"stop_loss_pct": 0.2, "take_profit_pct": 0.4}  # tight (percent): exercises the protective orders
 
 
 @pytest.fixture(scope="module")
@@ -62,7 +63,7 @@ def run(
 
 def test_journal_records_every_bar_signal_fill_and_trade(tmp_path: Path, aapl: pd.DataFrame) -> None:
     journal = Journal(tmp_path / "j.sqlite")
-    runner = run([fitted(MeanReversionStrategy(), aapl.iloc[:1000])], aapl.iloc[1000:], journal)
+    runner = run([fitted(MeanReversionStrategy(**EXITS), aapl.iloc[:1000])], aapl.iloc[1000:], journal)
     journal.close()
     data = read_journal(tmp_path / "j.sqlite")
 
@@ -80,7 +81,7 @@ def test_journal_records_every_bar_signal_fill_and_trade(tmp_path: Path, aapl: p
 
 def test_cascade_predictions_are_journaled(tmp_path: Path, aapl: pd.DataFrame) -> None:
     journal = Journal(tmp_path / "j.sqlite")
-    run([fitted(CascadeStrategy(), aapl.iloc[:1400])], aapl.iloc[1400:1450], journal)
+    run([fitted(CascadeStrategy(**EXITS), aapl.iloc[:1400])], aapl.iloc[1400:1450], journal)
     journal.close()
     decisions = read_journal(tmp_path / "j.sqlite").kind("decision")
     assert len(decisions) == 50 and "opportunity" in decisions
@@ -96,7 +97,9 @@ def trades_key(trades: list[Trade]) -> list[tuple[object, ...]]:
 
 def test_restart_from_saved_state_reproduces_the_uninterrupted_run(tmp_path: Path, aapl: pd.DataFrame) -> None:
     history, live = aapl.iloc[:1000], aapl.iloc[1000:]
-    snapshot = pickle.dumps([fitted(MeanReversionStrategy(), history), fitted(TrendFollowingStrategy(), history)])
+    snapshot = pickle.dumps(
+        [fitted(MeanReversionStrategy(**EXITS), history), fitted(TrendFollowingStrategy(**EXITS), history)]
+    )
 
     reference = run(pickle.loads(snapshot), live)
 
@@ -121,7 +124,7 @@ def test_restart_from_saved_state_reproduces_the_uninterrupted_run(tmp_path: Pat
 
 
 def test_catch_up_advances_open_lots_without_deciding(aapl: pd.DataFrame) -> None:
-    strategy = fitted(MeanReversionStrategy(), aapl.iloc[:1000])
+    strategy = fitted(MeanReversionStrategy(**EXITS), aapl.iloc[:1000])
     runner = run([strategy], aapl.iloc[1000:1100])
     open_lots = {lot.lot_id: lot.bars_held for lot in runner.router.lots.values()}
     runner.catch_up(aapl.iloc[1100:1103])
@@ -137,7 +140,7 @@ def test_catch_up_advances_open_lots_without_deciding(aapl: pd.DataFrame) -> Non
 def make_session(root: Path, history: pd.DataFrame, live: pd.DataFrame, live_slippage_bps: float) -> StrategyRunner:
     """A 'live' session whose fills are simulated with `live_slippage_bps` (stands for real fills)."""
     files = SessionFiles(root)
-    strategies: list[Strategy] = [fitted(MeanReversionStrategy(), history)]
+    strategies: list[Strategy] = [fitted(MeanReversionStrategy(**EXITS), history)]
     meta = {"mode": "shadow", "capital": 100_000.0, "risk": dataclasses.asdict(RISK), "fee_bps": 1.0,
             "slippage_bps": 1.0}  # fmt: skip
     files.save_snapshot(strategies, history, meta)
@@ -184,7 +187,8 @@ def push_minute(api: object, minute: int, close: float) -> None:
 
 
 class AlwaysBuy(Strategy):
-    holding_bars = 2
+    def __init__(self, symbol: str) -> None:
+        super().__init__(symbol=symbol, stop_loss_pct=None, take_profit_pct=None, holding_bars=2)
 
     def decide(self, bar: pd.Series) -> list[Order]:
         return [self.order(Side.BUY, 1)]
@@ -193,7 +197,7 @@ class AlwaysBuy(Strategy):
 def open_session(client: IBKRClient, root: Path, resume: bool = False) -> tuple[object, threading.Thread]:
     session = open_live_session(
         client, lambda: [AlwaysBuy(symbol="AAPL")], root,
-        LiveConfig(symbols=["AAPL"], risk=RiskLimits(stop_loss_pct=None, take_profit_pct=None)), resume=resume,
+        LiveConfig(symbols=["AAPL"], risk=RiskLimits(require_stop=False)), resume=resume,
     )  # fmt: skip
     thread = threading.Thread(target=session.run, daemon=True)
     thread.start()

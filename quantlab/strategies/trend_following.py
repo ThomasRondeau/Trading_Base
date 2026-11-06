@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 import pandas as pd
 
@@ -13,7 +14,7 @@ from quantlab.strategies.base import Strategy
 class TrendFollowingStrategy(Strategy):
     """Fast/slow SMA crossover."""
 
-    def __init__(self, sma_fast: int = 5, sma_slow: int = 20, symbol: str = "AAPL", **kwargs: str) -> None:
+    def __init__(self, sma_fast: int = 5, sma_slow: int = 20, symbol: str = "AAPL", **kwargs: Any) -> None:
         super().__init__(symbol=symbol, **kwargs)
         self.sma_fast = sma_fast
         self.sma_slow = sma_slow
