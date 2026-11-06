@@ -15,6 +15,7 @@ from typing import Any
 
 import pandas as pd
 
+from quantlab.config import IBKRSettings
 from quantlab.execution.ibkr.client import IBKRClient
 from quantlab.execution.ibkr.live import (
     LiveConfig,
@@ -55,8 +56,11 @@ class RunningSession:
 
 
 class LiveSessions:
-    def __init__(self, client_factory: Callable[[], IBKRClient] | None = None) -> None:
-        self.client_factory = client_factory or (lambda: IBKRClient(auto_reconnect=True))
+    def __init__(self, client_factory: Callable[[str], IBKRClient] | None = None) -> None:
+        """`client_factory(account)` builds the IBKR client of the "paper" or "live" session."""
+        self.client_factory = client_factory or (
+            lambda account: IBKRClient(IBKRSettings.from_env(account), auto_reconnect=True)
+        )
         self._lock = threading.Lock()
         self._sessions: dict[str, RunningSession] = {}
 
@@ -75,6 +79,7 @@ class LiveSessions:
         resume: bool = False,
         allow_live: bool = False,
         confirm_account: str | None = None,
+        account: str = "paper",
     ) -> RunningSession:
         with self._lock:
             current = self._sessions.get(name)
@@ -84,7 +89,7 @@ class LiveSessions:
             self._sessions[name] = entry
         entry.thread = threading.Thread(
             target=self._run,
-            kwargs={"client_factory": self.client_factory},
+            kwargs={"client_factory": lambda: self.client_factory(account)},
             args=(entry, params, config, resume, allow_live, confirm_account),
             name=f"live-{name}",
             daemon=True,

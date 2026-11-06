@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from collections.abc import Sequence
 from datetime import date
@@ -28,6 +29,7 @@ from typing import Any
 
 import pandas as pd
 
+from quantlab.config import ACCOUNTS
 from quantlab.data import loading
 from quantlab.data.loading import SOURCES, ibkr_client, split
 from quantlab.execution.risk import RiskLimits
@@ -82,7 +84,7 @@ def parse_grid(items: Sequence[str]) -> dict[str, list[Any]]:
 
 def load_bars(args: argparse.Namespace) -> pd.DataFrame:
     try:
-        return loading.load_bars(args.symbol, args.source, args.days, args.file)
+        return loading.load_bars(args.symbol, args.source, args.days, args.file, args.account)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 
@@ -185,7 +187,7 @@ def cmd_paper(args: argparse.Namespace) -> int:
         raise SystemExit("paper takes exactly one --strategy")
     name = args.strategy[0]
     spec = STRATEGIES[name]
-    with ibkr_client(auto_reconnect=True) as client:
+    with ibkr_client(auto_reconnect=True, account=args.account) as client:
         if needs_live_confirmation(client):
             if not args.live:
                 raise SystemExit(f"{', '.join(client.accounts)} is a real-money account: pass --live to trade it.")
@@ -254,7 +256,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logs")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    data = argparse.ArgumentParser(add_help=False)
+    account = argparse.ArgumentParser(add_help=False)
+    account.add_argument(
+        "--account",
+        choices=ACCOUNTS,
+        default=os.environ.get("IBKR_ACCOUNT", "paper"),
+        help="IBKR session: paper (IBKR_PORT_PAPER) or live (IBKR_PORT, real money); default IBKR_ACCOUNT or paper",
+    )
+
+    data = argparse.ArgumentParser(add_help=False, parents=[account])
     data.add_argument("--symbol", action="append", required=True, help="repeat for multi-symbol strategies")
     data.add_argument("--source", choices=SOURCES, default="yfinance")
     data.add_argument("--file", help="bars file for --source file (parquet or csv)")
@@ -298,7 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-trades", type=int, default=5)
     p.set_defaults(func=cmd_optimize)
 
-    p = commands.add_parser("paper", parents=[strategy, execution, sessions], help="journaled IBKR session")
+    p = commands.add_parser("paper", parents=[account, strategy, execution, sessions], help="journaled IBKR session")
     p.add_argument("--symbol", action="append", required=True)
     p.add_argument("--session", help="name (default: <strategy>_<symbols>_<date>)")
     p.add_argument("--resume", action="store_true", help="resume an interrupted session")

@@ -82,7 +82,7 @@ def test_client_refuses_orders_when_read_only() -> None:
 
 
 def test_client_refuses_orders_on_a_real_money_account() -> None:
-    client, api = make_client(read_only=False)
+    client, api = make_client(read_only=False, account="live")
     api.accounts = "U7654321"
     client.connect(timeout=2)
     assert not client.is_paper
@@ -90,7 +90,7 @@ def test_client_refuses_orders_on_a_real_money_account() -> None:
         client.place_order(stock("AAPL"), IBOrder())
     assert api.placed == []
 
-    client, api = make_client(read_only=False, allow_live=True)
+    client, api = make_client(read_only=False, allow_live=True, account="live")
     api.accounts = "U7654321"
     client.connect(timeout=2)
     client.place_order(stock("AAPL"), IBOrder())
@@ -98,17 +98,38 @@ def test_client_refuses_orders_on_a_real_money_account() -> None:
 
 
 def test_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("IBKR_ACCOUNT", raising=False)
     monkeypatch.setenv("IBKR_PORT", "7496")
+    monkeypatch.setenv("IBKR_PORT_PAPER", "7497")
     monkeypatch.setenv("IBKR_READ_ONLY", "false")
     monkeypatch.setenv("IBKR_ALLOW_LIVE", "true")
-    settings = IBKRSettings.from_env()
-    assert (settings.port, settings.read_only, settings.allow_live_account) == (7496, False, True)
+    settings = IBKRSettings.from_env()  # paper by default
+    assert (settings.account, settings.port, settings.read_only, settings.allow_live_account) == (
+        "paper",
+        7497,
+        False,
+        True,
+    )
+    assert (IBKRSettings.from_env("live").account, IBKRSettings.from_env("live").port) == ("live", 7496)
+    monkeypatch.setenv("IBKR_ACCOUNT", "live")
+    assert IBKRSettings.from_env().port == 7496
+    with pytest.raises(ValueError):
+        IBKRSettings.from_env("demo")
     monkeypatch.setenv("IBKR_READ_ONLY", "maybe")
     with pytest.raises(ValueError):
         IBKRSettings.from_env()
 
 
 # --- client ------------------------------------------------------------------------------------------------
+
+
+def test_paper_selection_refuses_a_real_money_session() -> None:
+    """Selecting the paper account guarantees a DU... account: a mis-set port fails at connection time."""
+    client, api = make_client(account="paper")
+    api.accounts = "U7654321"
+    with pytest.raises(ConnectionError, match="not a paper account"):
+        client.connect(timeout=2)
+    assert not api.connected
 
 
 def test_connect_failure_raises_a_helpful_error() -> None:

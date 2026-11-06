@@ -29,7 +29,7 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from quantlab.cli import parse_value  # noqa: E402
-from quantlab.config import IBKRSettings  # noqa: E402
+from quantlab.config import ACCOUNTS, IBKRSettings  # noqa: E402
 from quantlab.data import loading  # noqa: E402
 from quantlab.execution.risk import RiskLimits  # noqa: E402
 from quantlab.strategies.registry import STRATEGIES, build_strategy  # noqa: E402
@@ -183,15 +183,32 @@ def execution_inputs(key: str, live: bool = False) -> dict[str, Any]:
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
-def cached_bars(symbols: tuple[str, ...], source: str, days: int, file: str | None) -> pd.DataFrame:
-    return loading.load_bars(list(symbols), source, days, file)
+def cached_bars(
+    symbols: tuple[str, ...], source: str, days: int, file: str | None, account: str | None = None
+) -> pd.DataFrame:
+    return loading.load_bars(list(symbols), source, days, file, ibkr_account=account)
 
 
 def get_bars(data: dict[str, Any]) -> pd.DataFrame:
     if not data["symbols"]:
         raise ValueError("Indiquez au moins un symbole.")
     with st.spinner(f"Chargement des données {data['source']}…"):
-        return cached_bars(tuple(data["symbols"]), data["source"], data["days"], data["file"])
+        account = current_account() if data["source"] == "ibkr" else None
+        return cached_bars(tuple(data["symbols"]), data["source"], data["days"], data["file"], account)
+
+
+def current_account() -> str:
+    """IBKR session chosen on the Configuration page (default: IBKR_ACCOUNT, else paper)."""
+    if "ibkr_account" not in st.session_state:
+        st.session_state["ibkr_account"] = IBKRSettings.from_env().account
+    account: str = st.session_state["ibkr_account"]
+    return account
+
+
+def account_label(account: str) -> str:
+    settings = IBKRSettings.from_env(account)
+    kind = "Paper" if account == "paper" else "Réel"
+    return f"{kind} (port {settings.port})"
 
 
 def metric_tiles(metrics: dict[str, float]) -> None:
@@ -398,13 +415,15 @@ def page_live() -> None:
     from quantlab.execution.ibkr.live import LiveConfig
 
     st.header("Session live IBKR")
-    settings = IBKRSettings.from_env()
+    account = current_account()
+    settings = IBKRSettings.from_env(account)
     mode = "shadow : barres live, exécutions simulées, aucun ordre envoyé" if settings.read_only else (
         "ordres envoyés à IBKR (paper sur un compte DU…, réel seulement avec confirmation)")  # fmt: skip
     st.info(
-        f"TWS / IB Gateway : {settings.host}:{settings.port} (client id {settings.client_id}) · "
+        f"Compte {account_label(account)} · TWS / IB Gateway {settings.host}:{settings.port} "
+        f"(client id {settings.client_id}) · "
         f"IBKR_READ_ONLY={'true' if settings.read_only else 'false'} → mode {mode}. "
-        "Réglages dans le fichier .env."
+        "Compte à changer dans la page Configuration, réglages dans le fichier .env."
     )
     registry = live_sessions()
     with st.form("live_form"):
@@ -441,7 +460,8 @@ def page_live() -> None:
                 slippage_bps=execution["slippage_bps"],
             )
             registry.start(session, SESSIONS_DIR / session, name, symbols, parse_extra(params_text), config,
-                           resume=resume, allow_live=allow_live, confirm_account=confirm)  # fmt: skip
+                           resume=resume, allow_live=allow_live, confirm_account=confirm,
+                           account=account)  # fmt: skip
             st.success(f"Session {session} lancée.")
         except Exception as exc:
             show_error(exc)
@@ -630,6 +650,51 @@ def page_chart() -> None:
         st.download_button("Télécharger (PNG)", png, filename, "image/png")
 
 
+def page_config() -> None:
+    st.header("Configuration")
+    st.subheader("Compte IBKR")
+    st.caption(
+        "Choisit la session TWS / IB Gateway utilisée par toutes les pages : données IBKR, sessions live et "
+        "graphiques. Ports lus dans .env : IBKR_PORT_PAPER pour le paper, IBKR_PORT pour le compte réel."
+    )
+    accounts = list(ACCOUNTS)
+    chosen = st.radio(
+        "Compte",
+        accounts,
+        index=accounts.index(current_account()),
+        format_func=account_label,
+        horizontal=True,
+    )
+    st.session_state["ibkr_account"] = chosen
+    settings = IBKRSettings.from_env(chosen)
+    if chosen == "live":
+        st.warning(
+            "Compte réel sélectionné. Tant que IBKR_READ_ONLY=true, aucun ordre ne part (mode shadow). Sinon, "
+            "une session exige en plus la case « Autoriser un compte réel » et la saisie de l'identifiant du compte."
+        )
+    st.dataframe(
+        pd.Series(
+            {
+                "Hôte": settings.host,
+                "Port": str(settings.port),
+                "Client id": str(settings.client_id),
+                "Lecture seule (IBKR_READ_ONLY)": "oui" if settings.read_only else "non",
+                "Compte réel autorisé (IBKR_ALLOW_LIVE)": "oui" if settings.allow_live_account else "non",
+            },
+            name="valeur",
+        ),
+        width="stretch",
+    )
+    if st.button("Tester la connexion (données uniquement)"):
+        try:
+            with st.spinner("Connexion…"), loading.ibkr_client(account=chosen) as client:
+                accounts_found = ", ".join(client.accounts) or "inconnu"
+                kind = "paper" if client.is_paper else "réel"
+            st.success(f"Connecté à {settings.host}:{settings.port} · compte {accounts_found} ({kind}).")
+        except Exception as exc:
+            show_error(exc)
+
+
 def main() -> None:
     st.set_page_config(page_title="quantlab", page_icon=":chart_with_upwards_trend:", layout="wide")
     if not logging.getLogger().handlers:
@@ -641,8 +706,10 @@ def main() -> None:
             st.Page(page_live, title="Session live", icon=":material/sensors:", url_path="live"),
             st.Page(page_sessions, title="Sessions & replay", icon=":material/history:", url_path="sessions"),
             st.Page(page_chart, title="Graphique", icon=":material/candlestick_chart:", url_path="graphique"),
+            st.Page(page_config, title="Configuration", icon=":material/settings:", url_path="configuration"),
         ]
     )
+    st.sidebar.caption(f"Compte IBKR : **{account_label(current_account())}**")
     navigation.run()
 
 

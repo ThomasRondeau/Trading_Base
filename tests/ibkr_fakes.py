@@ -143,8 +143,10 @@ class FakeEClient:
             self.wrapper.commissionReport(report)
 
 
-def make_client(read_only: bool = True, allow_live: bool = False, **kwargs: Any) -> tuple[IBKRClient, FakeEClient]:
-    settings = IBKRSettings(read_only=read_only, allow_live_account=allow_live)
+def make_client(
+    read_only: bool = True, allow_live: bool = False, account: str = "paper", **kwargs: Any
+) -> tuple[IBKRClient, FakeEClient]:
+    settings = IBKRSettings(read_only=read_only, allow_live_account=allow_live, account=account)
     client = IBKRClient(settings, api_factory=FakeEClient, **kwargs)
     return client, client.api
 

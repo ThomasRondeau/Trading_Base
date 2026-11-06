@@ -41,7 +41,9 @@ def no_errors(at: AppTest) -> None:
     assert not at.error, [e.value for e in at.error]
 
 
-@pytest.mark.parametrize("page", ["page_backtest", "page_optimize", "page_live", "page_sessions", "page_chart"])
+@pytest.mark.parametrize(
+    "page", ["page_backtest", "page_optimize", "page_live", "page_sessions", "page_chart", "page_config"]
+)
 def test_every_page_renders(page: str, tmp_path: Path) -> None:
     at = page_app(page, str(tmp_path)).run()
     no_errors(at)
@@ -131,7 +133,7 @@ def test_live_sessions_run_in_the_background_and_stop(tmp_path: Path) -> None:
     t0 = 1_767_625_800
     clients: list[IBKRClient] = []
 
-    def factory() -> IBKRClient:  # read-only fake TWS: shadow mode
+    def factory(account: str) -> IBKRClient:  # read-only fake TWS: shadow mode
         client = IBKRClient(IBKRSettings(read_only=True), api_factory=FakeEClient)
         client.api.history = {"AAPL": [(t0 - 60 * k, 100.0) for k in range(40, -1, -1)]}
         clients.append(client)
@@ -161,13 +163,13 @@ def test_live_session_refuses_an_unconfirmed_real_account(tmp_path: Path) -> Non
     from quantlab.execution.ibkr.live import LiveConfig
     from quantlab.ui.live_runner import LiveSessions
 
-    def factory() -> IBKRClient:
-        client = IBKRClient(IBKRSettings(read_only=False), api_factory=FakeEClient)
+    def factory(account: str) -> IBKRClient:
+        client = IBKRClient(IBKRSettings(read_only=False, account=account), api_factory=FakeEClient)
         client.api.accounts = "U1234567"
         return client
 
     registry = LiveSessions(client_factory=factory)
     entry = registry.start("real", tmp_path / "real", "trend", ["AAPL"], {}, LiveConfig(symbols=["AAPL"]),
-                           allow_live=True, confirm_account="wrong")  # fmt: skip
+                           allow_live=True, confirm_account="wrong", account="live")  # fmt: skip
     wait_until(lambda: not entry.alive)
     assert entry.status == "erreur" and "not confirmed" in (entry.error or "")

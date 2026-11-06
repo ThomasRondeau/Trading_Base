@@ -178,7 +178,14 @@ class IBKRClient(EWrapper):  # type: ignore[misc]
     def connect(self, timeout: float = 10.0) -> None:
         """Connect and wait for the first order id; raises ConnectionError on failure."""
         s = self.settings
-        logger.info("Connecting to IBKR %s:%s (client id %s, read-only=%s)", s.host, s.port, s.client_id, s.read_only)
+        logger.info(
+            "Connecting to IBKR %s account on %s:%s (client id %s, read-only=%s)",
+            s.account,
+            s.host,
+            s.port,
+            s.client_id,
+            s.read_only,
+        )
         self._closing = False
         self._ready.clear()
         self._accounts_ready.clear()
@@ -192,6 +199,12 @@ class IBKRClient(EWrapper):  # type: ignore[misc]
                 f"socket port matches IBKR_PORT and client id {s.client_id} is free."
             )
         self._accounts_ready.wait(2.0)
+        if self.settings.account == "paper" and self.accounts and not self.is_paper:
+            self.disconnect()
+            raise ConnectionError(
+                f"Paper account selected but port {s.port} is logged into {', '.join(self.accounts)}, which is not a "
+                "paper account (DU...): check IBKR_PORT_PAPER."
+            )
 
     def disconnect(self) -> None:
         self._closing = True

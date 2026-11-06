@@ -265,16 +265,19 @@ Les réglages se trouvent dans `.env` ou dans l'environnement (voir `.env.exampl
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `IBKR_HOST` / `IBKR_PORT` / `IBKR_CLIENT_ID` | 127.0.0.1 / 7497 / 5 | TWS : 7497 paper, 7496 live ; IB Gateway : 4002 / 4001 |
+| `IBKR_HOST` / `IBKR_CLIENT_ID` | 127.0.0.1 / 5 | adresse de TWS ou IB Gateway |
+| `IBKR_ACCOUNT` | `paper` | session utilisée par défaut : `paper` ou `live` (option `--account` de la CLI, page Configuration de l'interface) |
+| `IBKR_PORT_PAPER` / `IBKR_PORT` | 7497 / 7496 | ports des sessions paper et réelle (IB Gateway : 4002 / 4001) |
 | `IBKR_READ_ONLY` | `true` | aucun ordre ne peut partir (mode shadow) |
 | `IBKR_ALLOW_LIVE` | `false` | autorise les ordres sur un compte réel |
 
 Les protections s'empilent sur plusieurs niveaux :
 
-1. Le client refuse `place_order` et `cancel_order` en lecture seule.
-2. Le socket lui-même (`GuardedEClient`) refuse `placeOrder`, `cancelOrder` et `reqGlobalCancel` en lecture seule.
-3. Sur un compte réel (identifiant autre que `DU…`), les ordres sont refusés sans `IBKR_ALLOW_LIVE`, et la CLI demande en plus `--live` et la saisie de l'identifiant du compte.
-4. `IBKRBroker` refuse même de se construire si la connexion est en lecture seule.
+1. Choisir le compte paper garantit un compte paper : si le port renvoie un compte réel, la connexion est refusée.
+2. Le client refuse `place_order` et `cancel_order` en lecture seule.
+3. Le socket lui-même (`GuardedEClient`) refuse `placeOrder`, `cancelOrder` et `reqGlobalCancel` en lecture seule.
+4. Sur un compte réel (identifiant autre que `DU…`), les ordres sont refusés sans `IBKR_ALLOW_LIVE`, et la CLI demande en plus `--live` et la saisie de l'identifiant du compte.
+5. `IBKRBroker` refuse même de se construire si la connexion est en lecture seule.
 
 ### 10.2 Threads
 

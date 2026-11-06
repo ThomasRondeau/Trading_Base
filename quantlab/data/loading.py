@@ -16,11 +16,12 @@ SOURCES = ("yfinance", "massive", "ibkr", "file")
 
 
 @contextmanager
-def ibkr_client(auto_reconnect: bool = False) -> Iterator[Any]:
-    """A connected `IBKRClient` (settings from the environment), disconnected on exit."""
+def ibkr_client(auto_reconnect: bool = False, account: str | None = None) -> Iterator[Any]:
+    """A connected `IBKRClient` (settings from the environment, `account` = paper / live), disconnected on exit."""
+    from quantlab.config import IBKRSettings
     from quantlab.execution.ibkr.client import IBKRClient
 
-    client = IBKRClient(auto_reconnect=auto_reconnect)
+    client = IBKRClient(IBKRSettings.from_env(account), auto_reconnect=auto_reconnect)
     client.connect()
     try:
         yield client
@@ -37,7 +38,9 @@ def read_bars_file(path: str | Path, symbols: Sequence[str] = ()) -> pd.DataFram
     return validate_ohlcv(raw)
 
 
-def load_bars(symbols: Sequence[str], source: str, days: int, file: str | Path | None = None) -> pd.DataFrame:
+def load_bars(
+    symbols: Sequence[str], source: str, days: int, file: str | Path | None = None, ibkr_account: str | None = None
+) -> pd.DataFrame:
     """Bars of `symbols` over the last `days` calendar days (several symbols: the multi-symbol layout)."""
     if source not in SOURCES:
         raise ValueError(f"Unknown source {source!r}; available: {', '.join(SOURCES)}.")
@@ -51,7 +54,7 @@ def load_bars(symbols: Sequence[str], source: str, days: int, file: str | Path |
     manager = DataManager()
     frames: dict[str, pd.DataFrame] = {}
     if source == "ibkr":
-        with ibkr_client() as client:
+        with ibkr_client(account=ibkr_account) as client:
             for symbol in symbols:
                 frames[symbol] = manager.collect_data_ibkr(client, symbol, days, 0)
     else:
