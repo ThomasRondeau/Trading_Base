@@ -31,7 +31,10 @@ class FeaturePipeline:
         if feature.name in path:
             raise ValueError(f"Dependency cycle: {' -> '.join((*path, feature.name))}")
         if feature.name in seen:
-            if seen[feature.name].outputs != feature.outputs:
+            other = seen[feature.name]
+            if other.outputs != feature.outputs or [d.name for d in other.inputs()] != [
+                d.name for d in feature.inputs()
+            ]:
                 raise ValueError(f"Two different features are named {feature.name!r}.")
             return
         for dep in feature.inputs():

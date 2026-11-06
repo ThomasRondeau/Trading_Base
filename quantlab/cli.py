@@ -6,7 +6,9 @@ quantlab command line: one entry point for research and trading.
     quantlab backtest --strategy pair --symbol AAPL --symbol MSFT --param zscore_threshold=2.0
     quantlab backtest --strategy trend --strategy mean_reversion --symbol AAPL --param trend.stop_atr=1.5 \
                       --param mean_reversion.target_middle_band=true --param holding_bars=10
-    quantlab optimize --strategy trend --symbol AAPL --grid sma_fast=5,10,20 --grid sma_slow=30,50,100 \\
+    quantlab backtest --strategy trend --symbol AAPL --params-file presets/trend-atr-exits.json
+    quantlab params --strategy cascade                (every parameter: group, default, bounds, help)
+    quantlab optimize --strategy trend --symbol AAPL --range sma_fast=5:20:5 --grid sma_slow=30,50,100 \\
                       --train-size 3000 --validation-size 1000 --test-size 1000 --embargo 30
     quantlab paper --strategy trend --symbol AAPL --session trend_aapl [--resume] [--live]
     quantlab replay --session trend_aapl
@@ -17,9 +19,11 @@ Data sources: yfinance (2-minute bars, ~60 days), massive (1-minute, MASSIVE_API
 needs TWS / IB Gateway), file (--file bars.parquet|csv). IBKR connection settings come from IBKR_* (see
 .env.example); `paper` runs in shadow mode (no order sent) while IBKR_READ_ONLY=true.
 
-Exits are strategy parameters (--param, per strategy with name.key=value): stop_loss_pct (2), take_profit_pct
-(5), stop_atr / take_profit_atr (ATR multiples, replace the percentages), atr_window (14), holding_bars (5);
-0 or none disables one. An entry without a stop is refused.
+Parameters: `quantlab params --strategy NAME` lists them. `--param key=value` applies to every selected strategy
+that declares the key, `--param name.key=value` to one; `--params-file` loads a preset (JSON, see presets/),
+which --param overrides. Unknown keys and out-of-bounds values are refused. Exits are strategy parameters too:
+stop_loss_pct (2), take_profit_pct (5), stop_atr / take_profit_atr (ATR multiples, replace the percentages),
+atr_window (14), holding_bars (5); 0 or none disables one. An entry without a stop is refused.
 """
 
 from __future__ import annotations
@@ -40,6 +44,7 @@ from quantlab.data import loading
 from quantlab.data.loading import SOURCES, ibkr_client, split
 from quantlab.execution.risk import RiskLimits
 from quantlab.strategies.base import Strategy
+from quantlab.strategies.params import GROUPS, ParamError, load_preset, param_range
 from quantlab.strategies.registry import STRATEGIES, build_strategy
 
 logger = logging.getLogger("quantlab")
@@ -65,9 +70,37 @@ def parse_value(text: str) -> Any:
     return text
 
 
-def parse_params(items: Sequence[str], strategies: Sequence[str]) -> dict[str, dict[str, Any]]:
-    """`--param key=value` applies to every strategy; `--param name.key=value` to one."""
+def format_value(value: Any) -> str:
+    """A parameter value as typed on the command line (`none`, `true`, `2,1,0`)."""
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, tuple):
+        return ",".join(map(str, value))
+    return str(value)
+
+
+def declares(strategy: str, key: str) -> bool:
+    return strategy in STRATEGIES and any(p.name == key for p in STRATEGIES[strategy].params)
+
+
+def parse_params(
+    items: Sequence[str], strategies: Sequence[str], files: Sequence[str | Path] = ()
+) -> dict[str, dict[str, Any]]:
+    """
+    Parameters per strategy: the presets `files` first, then `--param` items. `key=value` applies to every
+    strategy declaring `key` (an error if none does); `name.key=value` to one.
+    """
     params: dict[str, dict[str, Any]] = {name: {} for name in strategies}
+    for path in files:
+        try:
+            target, values = load_preset(path)
+        except ParamError as exc:
+            raise argparse.ArgumentTypeError(str(exc)) from exc
+        if target not in params:
+            raise argparse.ArgumentTypeError(f"--params-file {path}: {target!r} is not a selected strategy")
+        params[target].update(values)
     for item in items:
         key, sep, value = item.partition("=")
         if not sep:
@@ -75,9 +108,24 @@ def parse_params(items: Sequence[str], strategies: Sequence[str]) -> dict[str, d
         target, dot, name = key.rpartition(".")
         if dot and target not in params:
             raise argparse.ArgumentTypeError(f"--param {item!r}: {target!r} is not a selected strategy")
-        for strategy in [target] if dot else list(params):
+        targets = [target] if dot else [s for s in params if declares(s, name)]
+        if not dot and not targets:
+            raise argparse.ArgumentTypeError(
+                f"--param {item!r}: no selected strategy has a parameter {name!r} (see quantlab params)"
+            )
+        for strategy in targets:
             params[strategy][name] = parse_value(value)
     return params
+
+
+def params_table(name: str) -> pd.DataFrame:
+    """The parameter sheet of a strategy, grouped (for `quantlab params`)."""
+    rows = [p.describe() for p in STRATEGIES[name].params]
+    order = {group: i for i, group in enumerate(GROUPS)}
+    table = pd.DataFrame(rows)
+    table["default"] = [format_value(row["default"]) for row in rows]  # no float upcast of the ints
+    table["_order"] = [order.get(g.split(":", 1)[0], len(order)) for g in table["group"]]
+    return table.sort_values("_order", kind="stable").drop(columns="_order").reset_index(drop=True)
 
 
 def parse_grid(items: Sequence[str]) -> dict[str, list[Any]]:
@@ -90,6 +138,25 @@ def parse_grid(items: Sequence[str]) -> dict[str, list[Any]]:
     return grid
 
 
+def parse_ranges(items: Sequence[str], strategy: str) -> dict[str, list[Any]]:
+    """`--range key=min:max:step` -> the values of a numeric parameter, checked by the strategy's sheet."""
+    sheet = {p.name: p for p in STRATEGIES[strategy].params}
+    grid: dict[str, list[Any]] = {}
+    for item in items:
+        key, sep, spec = item.partition("=")
+        parts = spec.split(":")
+        if not sep or len(parts) != 3:
+            raise argparse.ArgumentTypeError(f"--range expects key=min:max:step, got {item!r}")
+        if key not in sheet:
+            raise argparse.ArgumentTypeError(f"--range {item!r}: {strategy} has no parameter {key!r}")
+        try:
+            start, stop, step = (float(v) for v in parts)
+            grid[key] = param_range(sheet[key], start, stop, step)
+        except (ValueError, ParamError) as exc:
+            raise argparse.ArgumentTypeError(f"--range {item!r}: {exc}") from exc
+    return grid
+
+
 def load_bars(args: argparse.Namespace) -> pd.DataFrame:
     try:
         return loading.load_bars(args.symbol, args.source, args.days, args.file, args.account)
@@ -97,8 +164,19 @@ def load_bars(args: argparse.Namespace) -> pd.DataFrame:
         raise SystemExit(str(exc)) from exc
 
 
+def strategy_params(args: argparse.Namespace, strategies: Sequence[str]) -> dict[str, dict[str, Any]]:
+    """Parameters per strategy, validated by their sheets (a clear exit on an invalid value)."""
+    params = parse_params(args.param, strategies, args.params_file)
+    for name, values in params.items():
+        try:
+            STRATEGIES[name].validate(values)
+        except ParamError as exc:
+            raise SystemExit(f"{name}: {exc}") from exc
+    return params
+
+
 def build_strategies(args: argparse.Namespace) -> list[Strategy]:
-    params = parse_params(args.param, args.strategy)
+    params = strategy_params(args, args.strategy)
     return [build_strategy(name, args.symbol, params[name]) for name in args.strategy]
 
 
@@ -158,11 +236,14 @@ def cmd_optimize(args: argparse.Namespace) -> int:
     if len(args.strategy) != 1:
         raise SystemExit("optimize takes exactly one --strategy")
     name = args.strategy[0]
-    fixed = parse_params(args.param, [name])[name]
+    fixed = strategy_params(args, [name])[name]
+    grid = {**parse_grid(args.grid), **parse_ranges(args.range, name)}
+    if not grid:
+        raise SystemExit("optimize needs at least one --grid or --range")
     data = load_bars(args)
     optimizer = WalkForwardOptimizer(
         strategy_factory=lambda **p: build_strategy(name, args.symbol, {**fixed, **p}),
-        param_grid=parse_grid(args.grid),
+        param_grid=grid,
         train_size=args.train_size,
         validation_size=args.validation_size,
         test_size=args.test_size,
@@ -203,7 +284,7 @@ def cmd_paper(args: argparse.Namespace) -> int:
             except PermissionError as exc:
                 raise SystemExit(str(exc)) from exc
         session = args.session or f"{name}_{'_'.join(args.symbol)}_{date.today():%Y%m%d}"
-        params = parse_params(args.param, [name])[name]
+        params = strategy_params(args, [name])[name]
         config = LiveConfig(
             symbols=list(args.symbol),
             bar_seconds=args.bar_seconds,
@@ -244,6 +325,14 @@ def cmd_plot(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_params(args: argparse.Namespace) -> int:
+    with pd.option_context("display.max_colwidth", 90, "display.width", 250):
+        for name in args.strategy:
+            print(f"{name} ({STRATEGIES[name].factory.__name__})")
+            print(params_table(name).to_string(index=False) + "\n")
+    return 0
+
+
 def cmd_ui(args: argparse.Namespace) -> int:
     import subprocess
 
@@ -279,6 +368,9 @@ def build_parser() -> argparse.ArgumentParser:
     strategy = argparse.ArgumentParser(add_help=False)
     strategy.add_argument("--strategy", action="append", required=True, choices=sorted(STRATEGIES))
     strategy.add_argument("--param", action="append", default=[], help="key=value or strategy.key=value")
+    strategy.add_argument(
+        "--params-file", action="append", default=[], help="preset JSON {strategy, params}; --param overrides it"
+    )
 
     def execution_parser(live: bool) -> argparse.ArgumentParser:
         # One parser per command: argparse parents share their actions, so defaults set on one command
@@ -314,7 +406,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_backtest)
 
     p = commands.add_parser("optimize", parents=[data, strategy], help="walk-forward hyperparameter search")
-    p.add_argument("--grid", action="append", required=True, help="key=v1,v2,...")
+    p.add_argument("--grid", action="append", default=[], help="key=v1,v2,...")
+    p.add_argument("--range", action="append", default=[], help="key=min:max:step (numeric parameters)")
     p.add_argument("--train-size", type=int, required=True)
     p.add_argument("--validation-size", type=int, required=True)
     p.add_argument("--test-size", type=int, required=True)
@@ -346,6 +439,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--date", help="session date (default: the last one)")
     p.add_argument("--output", help="save to this image file instead of showing")
     p.set_defaults(func=cmd_plot)
+
+    p = commands.add_parser("params", help="list the parameters of strategies")
+    p.add_argument("--strategy", action="append", required=True, choices=sorted(STRATEGIES))
+    p.set_defaults(func=cmd_params)
 
     p = commands.add_parser("ui", help="graphical interface in the browser (Streamlit)")
     p.add_argument("--port", type=int, default=8501)

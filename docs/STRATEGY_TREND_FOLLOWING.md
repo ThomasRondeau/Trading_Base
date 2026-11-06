@@ -17,8 +17,8 @@ Les deux moyennes sont calculées à chaque barre sur le buffer live, ou précal
 
 La stratégie compare les deux dernières lignes de features (`self.feed.latest(2)`) :
 
-- **achat de 10 actions** quand la SMA rapide passe **au-dessus** de la SMA lente (elle était inférieure ou égale à la barre précédente) ;
-- **vente de 10 actions** quand elle passe **en dessous**.
+- **achat** (10 actions par défaut) quand la SMA rapide passe **au-dessus** de la SMA lente (elle était inférieure ou égale à la barre précédente) ;
+- **vente** quand elle passe **en dessous**.
 
 La stratégie n'émet que des entrées. Comme pour toutes les stratégies, la sortie est gérée par l'`OrderRouter` :
 
@@ -33,6 +33,9 @@ Voir [FONCTIONNEMENT_TECHNIQUE.md §7](FONCTIONNEMENT_TECHNIQUE.md).
 |---|---|---|
 | `sma_fast` | 5 | `--param sma_fast=10` |
 | `sma_slow` | 20 | `--param sma_slow=50` |
+| taille (`size_mode`, `quantity`, `size_value`) | fixed, 10, aucun | `--param size_mode=risk --param size_value=0.5` |
+
+Tous les paramètres (indicateurs, seuils, taille, sorties) : `quantlab params --strategy trend`, ou le formulaire de l'interface.
 
 ```bash
 py -3.10 -m quantlab backtest --strategy trend --symbol AAPL --source yfinance --days 55 --test-days 5

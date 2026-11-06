@@ -19,6 +19,7 @@ import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from quantlab.execution.broker import Broker
 from quantlab.execution.ibkr.bar_feed import IBKRBarFeed
@@ -46,6 +47,11 @@ class LiveConfig:
     #: costs of the simulated fills (shadow mode, and the replay)
     fee_bps: float = 1.0
     slippage_bps: float = 1.0
+
+
+def jsonable(params: dict[str, Any]) -> dict[str, Any]:
+    """Parameter values for session.json (tuples as lists)."""
+    return {k: list(v) if isinstance(v, tuple) else v for k, v in params.items()}
 
 
 def needs_live_confirmation(client: IBKRClient) -> bool:
@@ -149,6 +155,7 @@ def open_live_session(
             "fee_bps": config.fee_bps,
             "slippage_bps": config.slippage_bps,
             "strategies": [s.strategy_id for s in strategies],
+            "params": {s.strategy_id: jsonable(getattr(s, "params", {})) for s in strategies},
             "accounts_paper": client.is_paper,
         }
         files.save_snapshot(strategies, history, meta)

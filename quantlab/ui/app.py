@@ -10,13 +10,12 @@ The pages call the same library functions as the CLI; the labels are in French.
 
 from __future__ import annotations
 
-import ast
 import hashlib
-import inspect
 import io
 import logging
 import sys
 import tempfile
+from collections.abc import Mapping, Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -28,11 +27,19 @@ if str(_ROOT) not in sys.path:  # `streamlit run` puts only this file's folder o
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
-from quantlab.cli import parse_value  # noqa: E402
+from quantlab.cli import format_value, parse_value  # noqa: E402
 from quantlab.config import ACCOUNTS, IBKRSettings  # noqa: E402
 from quantlab.data import loading  # noqa: E402
 from quantlab.execution.risk import RiskLimits  # noqa: E402
-from quantlab.strategies.base import EXIT_PARAMS, Strategy  # noqa: E402
+from quantlab.strategies.params import (  # noqa: E402
+    GROUPS,
+    Param,
+    ParamError,
+    defaults,
+    load_preset,
+    param_range,
+    save_preset,
+)
 from quantlab.strategies.registry import STRATEGIES, build_strategy  # noqa: E402
 from quantlab.ui import charts  # noqa: E402
 
@@ -53,67 +60,158 @@ STRATEGY_LABELS = {
     "pair": "Pair trading (2 symboles)",
 }
 OBJECTIVES = ("total_return_pct", "sharpe_ratio", "sortino_ratio", "profit_factor", "total_pnl_net", "win_rate")
-EXCLUDED_PARAMS = {"self", "symbol", "symbol_a", "symbol_b", "strategy_id"}
 SESSIONS_DIR = Path("sessions")
+#: versioned parameter presets, `<strategy>-<name>.json`
+PRESETS_DIR = _ROOT / "presets"
 
 
 # --- shared widgets ----------------------------------------------------------------------------------------
 
 
-#: exit parameters of every strategy (base class): label, help, kind; 0 disables a level or the time exit
-EXIT_WIDGETS: dict[str, tuple[str, str, type]] = {
-    "stop_loss_pct": ("Stop (% du prix d'entrée)", "0 = aucun stop : l'entrée est alors refusée.", float),
-    "take_profit_pct": ("Objectif (% du prix d'entrée)", "0 = aucun objectif.", float),
-    "holding_bars": ("Durée max (barres)", "Clôture au marché après ce nombre de barres ; 0 = aucune.", int),
-    "stop_atr": (
-        "Stop en ATR",
-        "Distance du stop en multiples d'ATR, mesurée au signal ; remplace le %. 0 = non.",
-        float,
-    ),
-    "take_profit_atr": (
-        "Objectif en ATR",
-        "Distance de l'objectif en multiples d'ATR ; remplace le %. 0 = non.",
-        float,
-    ),
-    "atr_window": ("Fenêtre de l'ATR", "Barres de l'ATR utilisé par les niveaux en ATR.", int),
+#: display names of the parameter groups
+SECTION_LABELS = {
+    "signal": "Signal",
+    "indicateurs": "Indicateurs",
+    "modèle": "Modèle",
+    "cible": "Cible",
+    "taille": "Taille",
+    "sorties": "Sorties",
 }
-#: strategies whose stop / target apply to a group (pair: combined P&L, no ATR level)
-GROUP_STRATEGIES = {"pair"}
+NUMERIC = ("int", "float")
 
 
-def strategy_signature(name: str) -> dict[str, Any]:
-    """Tunable constructor parameters of a strategy (its own, then the exit parameters) and their defaults."""
-    params: dict[str, Any] = {}
-    signatures = (inspect.signature(STRATEGIES[name].factory), inspect.signature(Strategy.__init__))
-    for signature in signatures:
-        for param in signature.parameters.values():
-            if param.name in EXCLUDED_PARAMS or param.kind in (param.VAR_KEYWORD, param.VAR_POSITIONAL):
-                continue
-            params.setdefault(param.name, None if param.default is inspect.Parameter.empty else param.default)
-    return params
+def sheet(name: str) -> tuple[Param, ...]:
+    return STRATEGIES[name].params
 
 
-def exit_inputs(key: str, group: bool = False) -> dict[str, Any]:
-    """Exit parameters (stop, target, holding period); only values that differ from the default are returned."""
-    defaults = inspect.signature(Strategy.__init__).parameters
-    names = [n for n in EXIT_WIDGETS if not (group and n in ("stop_atr", "take_profit_atr", "atr_window"))]
+def group_label(group: str) -> str:
+    section, _, model = group.partition(":")
+    return SECTION_LABELS.get(section, section) + (f" : {model}" if model else "")
+
+
+def grouped(params: Sequence[Param]) -> dict[str, list[Param]]:
+    """Parameters by group, in the GROUPS order (declaration order inside a group)."""
+    order = {section: i for i, section in enumerate(GROUPS)}
+    groups: dict[str, list[Param]] = {}
+    for param in sorted(params, key=lambda p: order.get(p.section, len(order))):
+        groups.setdefault(param.group, []).append(param)
+    return groups
+
+
+def to_widget(param: Param, value: Any) -> Any:
+    """A parameter value as its widget holds it (numbers: 0 for "none"; tuples as text)."""
+    if param.kind == "int":
+        return int(value or 0)
+    if param.kind == "float":
+        return float(value or 0.0)
+    if param.kind == "tuple":
+        return ", ".join(map(str, value or ()))
+    return value
+
+
+def from_widget(param: Param, raw: Any) -> Any:
+    """The widget value as a parameter value (0 means "none" for an optional number); raises ParamError."""
+    if param.optional and param.kind in NUMERIC and raw == 0:
+        return None
+    return param.convert(raw)
+
+
+def param_widget(param: Param, key: str) -> Any:
+    """The widget of one parameter; its value is kept in `st.session_state[key]` (presets write it there)."""
+    if key not in st.session_state:
+        st.session_state[key] = to_widget(param, param.default)
+    label = param.name
+    help_text = param.help
+    if param.kind == "bool":
+        return st.checkbox(label, key=key, help=help_text)
+    if param.kind == "int":
+        low = None if param.min is None else int(param.min)
+        high = None if param.max is None else int(param.max)
+        return st.number_input(label, min_value=low, max_value=high, step=1, key=key, help=help_text)
+    if param.kind == "float":
+        flow = None if param.min is None or (param.optional and param.min > 0) else float(param.min)
+        fhigh = None if param.max is None else float(param.max)
+        return st.number_input(label, min_value=flow, max_value=fhigh, format="%g", key=key, help=help_text)
+    if param.kind == "choice":
+        options = [*param.choices, *([None] if param.optional else [])]
+        return st.selectbox(label, options, key=key, help=help_text, format_func=lambda v: "aucune" if v is None else v)
+    return st.text_input(label, key=key, help=help_text + " Valeurs séparées par des virgules.")
+
+
+def widget_key(key: str, name: str, param: Param) -> str:
+    return f"{key}_{name}_{param.name}"
+
+
+def set_widgets(key: str, name: str, values: Mapping[str, Any]) -> None:
+    """Write parameter values into the widgets (before they are drawn: presets, reset)."""
+    for param in sheet(name):
+        st.session_state[widget_key(key, name, param)] = to_widget(param, values.get(param.name, param.default))
+
+
+def preset_paths(name: str) -> list[Path]:
+    return sorted(PRESETS_DIR.glob(f"{name}-*.json"))
+
+
+def preset_controls(name: str, key: str) -> None:
+    """Load a preset of `presets/` or the defaults into the widgets (drawn above them)."""
+    paths = {p.stem: p for p in preset_paths(name)}
+    c1, c2, c3 = st.columns([3, 1, 1], vertical_alignment="bottom")
+    chosen = c1.selectbox("Preset", list(paths), index=None, placeholder="aucun", key=f"{key}_{name}_preset")
+    if c2.button("Charger", key=f"{key}_{name}_load", disabled=chosen is None) and chosen is not None:
+        try:
+            _, values = load_preset(paths[chosen])
+            set_widgets(key, name, STRATEGIES[name].validate(values))
+            st.toast(f"Preset {chosen} chargé")
+        except ParamError as exc:
+            st.error(f"Preset {chosen} invalide : {exc}")
+    if c3.button("Défauts", key=f"{key}_{name}_reset", help="Remettre toutes les valeurs par défaut"):
+        set_widgets(key, name, {})
+
+
+def param_inputs(name: str, key: str, presets: bool = True) -> dict[str, Any]:
+    """
+    Form of every parameter of a strategy, generated from its sheet (one tab per group); returns the values
+    that differ from the defaults. Errors (bounds, rules linking several values) are shown under the form.
+    """
+    if presets:
+        preset_controls(name, key)
     chosen: dict[str, Any] = {}
-    columns = st.columns(3)
-    for i, param in enumerate(names):
-        label, help_text, kind = EXIT_WIDGETS[param]
-        if group and param in ("stop_loss_pct", "take_profit_pct"):
-            label = label.replace("du prix d'entrée", "du notionnel de la paire")
-        default = defaults[param].default or 0
-        widget_key = f"{key}_exit_{param}"
-        with columns[i % 3]:
-            if kind is int:
-                value: Any = int(st.number_input(label, min_value=0, value=int(default), step=1, key=widget_key,
-                                                 help=help_text))  # fmt: skip
-            else:
-                value = float(st.number_input(label, min_value=0.0, value=float(default), format="%g",
-                                              key=widget_key, help=help_text))  # fmt: skip
-        if value != default:
-            chosen[param] = value
+    errors: list[str] = []
+    groups = grouped(sheet(name))
+    for tab, params in zip(st.tabs([group_label(g) for g in groups]), groups.values(), strict=True):
+        with tab:
+            columns = st.columns(3)
+            for i, param in enumerate(params):
+                with columns[i % 3]:
+                    raw = param_widget(param, widget_key(key, name, param))
+                try:
+                    value = from_widget(param, raw)
+                except ParamError as exc:
+                    errors.append(str(exc))
+                    continue
+                if value != param.default:
+                    chosen[param.name] = value
+    if STRATEGIES[name].factory.is_group:
+        st.caption("Stop et objectif : sur le P&L combiné des deux jambes, de même notionnel, clôturées ensemble.")
+    if chosen:
+        st.caption("Différent des défauts : " + ", ".join(f"{k}={format_value(v)}" for k, v in chosen.items()))
+    try:
+        values = STRATEGIES[name].validate(chosen)
+        full = {**defaults(sheet(name)), **values}
+        for warning in STRATEGIES[name].factory.warnings(full):
+            st.warning(warning)
+    except ParamError as exc:
+        errors.append(str(exc))
+    for error in errors:
+        st.error(error)
+    if presets:
+        c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+        label = c1.text_input("Enregistrer comme preset", key=f"{key}_{name}_save_as", placeholder="ex. stops-larges")
+        slug = "-".join(label.strip().lower().split())
+        if c2.button("Enregistrer", key=f"{key}_{name}_save", disabled=not slug or bool(errors)):
+            path = PRESETS_DIR / f"{name}-{slug}.json"
+            save_preset(path, name, chosen)
+            st.toast(f"Preset enregistré : {path.name}")
     return chosen
 
 
@@ -131,36 +229,35 @@ def parse_extra(text: str) -> dict[str, Any]:
     return extra
 
 
-def param_inputs(name: str, key: str) -> dict[str, Any]:
-    """Inputs for every parameter of a strategy; only values that differ from the default are returned."""
-    chosen: dict[str, Any] = {}
-    defaults = {k: v for k, v in strategy_signature(name).items() if k not in EXIT_PARAMS}
-    columns = st.columns(3)
-    for i, (param, default) in enumerate(defaults.items()):
-        with columns[i % 3]:
-            widget_key = f"{key}_{name}_{param}"
-            if isinstance(default, bool):
-                value: Any = st.checkbox(param, value=default, key=widget_key)
-            elif isinstance(default, int):
-                value = int(st.number_input(param, value=default, step=1, key=widget_key))
-            elif isinstance(default, float):
-                value = float(st.number_input(param, value=default, format="%g", key=widget_key))
-            else:
-                raw = st.text_input(param, value=repr(default), key=widget_key, help="Valeur Python, ex. (2, 1, 0)")
-                value = ast.literal_eval(raw) if raw.strip() else default
-            if value != default:
-                chosen[param] = value
-    group = name in GROUP_STRATEGIES
-    st.markdown(
-        "**Sorties** (par position)"
-        + (" : stop et objectif sur le P&L combiné des deux jambes, clôturées ensemble" if group else "")
+def grid_inputs(name: str) -> dict[str, list[Any]]:
+    """Ranges (numbers) or value lists (booleans, choices) of the parameters to optimize."""
+    tunable = [p for p in sheet(name) if p.kind in (*NUMERIC, "bool", "choice")]
+    by_name = {p.name: p for p in tunable}
+    selected = st.multiselect(
+        "Paramètres à optimiser", list(by_name), key=f"wf_grid_{name}", help="Les autres gardent la valeur ci-dessus."
     )
-    chosen.update(exit_inputs(f"{key}_{name}", group=group))
-    extra = st.text_area(
-        "Autres paramètres (clé=valeur, un par ligne)", key=f"{key}_{name}_extra", height=68, placeholder="sma_fast=10"
-    )
-    chosen.update(parse_extra(extra))
-    return chosen
+    grid: dict[str, list[Any]] = {}
+    for param_name in selected:
+        param = by_name[param_name]
+        key = f"wf_range_{name}_{param_name}"
+        if param.kind in NUMERIC:
+            c0, c1, c2, c3 = st.columns([2, 1, 1, 1], vertical_alignment="bottom")
+            c0.markdown(f"`{param_name}` · {param.help}")
+            default = float(param.default or (param.min or 0) or 1)
+            start = c1.number_input("min", value=default, format="%g", key=f"{key}_min")
+            stop = c2.number_input("max", value=default * 2, format="%g", key=f"{key}_max")
+            step = c3.number_input("pas", value=1.0 if param.kind == "int" else default / 2 or 0.1, format="%g",
+                                   key=f"{key}_step")  # fmt: skip
+            try:
+                grid[param_name] = param_range(param, start, stop, step)
+            except ParamError as exc:
+                st.error(str(exc))
+        else:
+            options = [True, False] if param.kind == "bool" else [*param.choices, *([None] if param.optional else [])]
+            grid[param_name] = st.multiselect(param_name, options, default=options, key=key, help=param.help)
+    if grid:
+        st.caption(" · ".join(f"{k} : {', '.join(map(format_value, v))}" for k, v in grid.items()))
+    return grid
 
 
 def data_inputs(key: str, multi_symbol: bool = True, default_days: int = 55) -> dict[str, Any]:
@@ -402,15 +499,10 @@ def page_optimize() -> None:
     )
     name = st.selectbox("Stratégie", list(STRATEGIES), format_func=STRATEGY_LABELS.__getitem__, key="wf_strategy")
     data = data_inputs("wf")
-    st.markdown("**Grille** : valeurs séparées par des virgules ; laisser vide pour garder la valeur par défaut.")
-    grid: dict[str, list[Any]] = {}
-    defaults = strategy_signature(name)
-    columns = st.columns(3)
-    for i, (param, default) in enumerate(defaults.items()):
-        raw = columns[i % 3].text_input(f"{param} (défaut {default!r})", key=f"wf_grid_{name}_{param}")
-        if raw.strip():
-            grid[param] = [parse_value(v.strip()) for v in raw.split(",") if v.strip()]
-    fixed = parse_extra(st.text_area("Paramètres fixes (clé=valeur)", key=f"wf_fixed_{name}", height=68))
+    with st.expander("Paramètres fixes", expanded=False):
+        fixed = param_inputs(name, "wf")
+    st.markdown("**Grille** : plage min / max / pas pour les nombres, liste de valeurs sinon.")
+    grid = grid_inputs(name)
     c1, c2, c3, c4 = st.columns(4)
     train_size = int(c1.number_input("Barres d'entraînement", min_value=10, value=3000, step=100))
     validation_size = int(c2.number_input("Barres de validation", min_value=10, value=1000, step=100))
@@ -476,10 +568,11 @@ def page_live() -> None:
         "Compte à changer dans la page Configuration, réglages dans le fichier .env."
     )
     registry = live_sessions()
+    name = st.selectbox("Stratégie", list(STRATEGIES), format_func=STRATEGY_LABELS.__getitem__, key="live_strategy")
+    with st.expander(f"Paramètres : {STRATEGY_LABELS[name]}", expanded=False):
+        params = param_inputs(name, "live")
     with st.form("live_form"):
-        c1, c2 = st.columns(2)
-        name = c1.selectbox("Stratégie", list(STRATEGIES), format_func=STRATEGY_LABELS.__getitem__)
-        symbols_text = c2.text_input("Symbole(s)", value="AAPL", help="Deux symboles pour le pair trading.")
+        symbols_text = st.text_input("Symbole(s)", value="AAPL", help="Deux symboles pour le pair trading.")
         c1, c2, c3 = st.columns(3)
         session_name = c1.text_input("Nom de session", placeholder="défaut : <stratégie>_<symboles>_<date>")
         resume = c2.checkbox("Reprendre une session existante")
@@ -487,9 +580,6 @@ def page_live() -> None:
         c1, c2 = st.columns(2)
         bar_seconds = int(c1.number_input("Durée des barres (s)", min_value=5, value=60, step=5))
         history = c2.text_input("Historique de préchauffage IBKR", placeholder="défaut selon la stratégie, ex. 2 D")
-        st.markdown("**Sorties** (par position ; pour le pair trading : sur le P&L combiné, sans ATR)")
-        exits = exit_inputs("live")
-        params_text = st.text_area("Autres paramètres de la stratégie (clé=valeur)", height=68)
         execution = execution_inputs("live", live=True)
         st.markdown("**Compte réel** : jamais par défaut.")
         c1, c2 = st.columns(2)
@@ -511,7 +601,6 @@ def page_live() -> None:
                 fee_bps=execution["fee_bps"],
                 slippage_bps=execution["slippage_bps"],
             )
-            params = {**exits, **parse_extra(params_text)}
             registry.start(session, SESSIONS_DIR / session, name, symbols, params, config,
                            resume=resume, allow_live=allow_live, confirm_account=confirm,
                            account=account)  # fmt: skip
@@ -621,6 +710,9 @@ def page_sessions() -> None:
             f"Mode {meta.get('mode')} · {', '.join(meta.get('symbols', []))} · stratégies "
             f"{', '.join(meta.get('strategies', []))} · capital {meta.get('capital', 0):,.0f} $"
         )
+        for strategy_id, values in (meta.get("params") or {}).items():
+            with st.expander(f"Paramètres de {strategy_id}"):
+                st.dataframe(pd.DataFrame({"valeur": {k: format_value(v) for k, v in values.items()}}), width="stretch")
     journal_tab, replay_tab = st.tabs(["Journal", "Replay (live vs backtest)"])
     with journal_tab:
         try:

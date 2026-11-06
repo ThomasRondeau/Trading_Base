@@ -16,7 +16,7 @@ La stratégie exploite l'autocorrélation à court terme des prix avec un modèl
 La stratégie ne trade que si le mouvement prévu **couvre les coûts** :
 
 - si \|variation prévue\| / prix < `min_edge_bps` (2 bp par défaut, soit les frais aller-retour de 2 × 1 bp), elle ne fait rien ;
-- sinon, elle achète 5 actions si la prévision est haussière, et en vend 5 si elle est baissière.
+- sinon, elle achète si la prévision est haussière, et vend si elle est baissière (5 actions par défaut : `quantity`, ou un autre mode de taille).
 
 Avant la refonte, la stratégie tradait à **chaque** barre : le seuil n'était jamais appliqué. La prévision est maintenant journalisée à chaque barre (`diagnostics = {"forecast_change": …}`). La sortie est gérée par l'`OrderRouter` : après 5 barres, ou au stop loss à −2 % ou au take profit à +5 %.
 
@@ -24,9 +24,12 @@ Avant la refonte, la stratégie tradait à **chaque** barre : le seuil n'était 
 
 | Paramètre | Défaut | Exemple |
 |---|---|---|
-| `order` | (2, 1, 0) | dans le code uniquement (tuple) |
+| `order` | (2, 1, 0) | `--param order=1,1,1` |
 | `min_edge_bps` | 2,0 | `--param min_edge_bps=4` |
 | `window` | 50 | `--param window=100` |
+| taille (`size_mode`, `quantity`, `size_value`) | fixed, 5, aucun | `--param size_mode=risk --param size_value=0.5` |
+
+Tous les paramètres (indicateurs, seuils, taille, sorties) : `quantlab params --strategy arima`, ou le formulaire de l'interface.
 
 ## 4. Résultats actuels
 

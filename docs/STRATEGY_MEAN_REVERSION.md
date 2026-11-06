@@ -17,11 +17,11 @@ La stratégie joue les excès de prix temporaires hors des bandes de Bollinger. 
 
 Il faut que le prix **dépasse franchement** la bande, et pas seulement qu'il la touche :
 
-- **achat de 10 actions** si les trois conditions sont réunies :
+- **achat** (10 actions par défaut) si les trois conditions sont réunies :
   - close < bande basse − 0,2 × ATR ;
   - RSI < `rsi_threshold` (30) ;
   - ratio de volume > 1,2 ;
-- **vente de 10 actions** si les trois conditions sont réunies :
+- **vente** (10 actions par défaut) si les trois conditions sont réunies :
   - close > bande haute + 0,2 × ATR ;
   - RSI > 100 − `rsi_threshold` (70) ;
   - ratio de volume > 1,2.
@@ -34,7 +34,12 @@ Le pic de volume sert d'indice d'un climax d'achat ou de vente. Par défaut, la 
 |---|---|---|
 | `rsi_threshold` | 30 | `--param rsi_threshold=25` |
 | `target_middle_band` | false | `--param target_middle_band=true` |
+| `volume_threshold`, `band_atr_multiple` | 1,2, 0,2 | `--param volume_threshold=1.5` |
+| `bb_window`, `bb_std`, `rsi_window`, `volume_window`, `band_atr_window` | 20, 2, 14, 20, 14 | `--param bb_window=30` |
+| taille (`size_mode`, `quantity`, `size_value`) | fixed, 10, aucun | `--param size_mode=risk --param size_value=0.5` |
 | sorties (`stop_loss_pct`, `take_profit_pct`, `stop_atr`, `holding_bars`…) | 2, 5, aucun, 5 | `--param stop_atr=1.5` |
+
+Tous les paramètres (indicateurs, seuils, taille, sorties) : `quantlab params --strategy mean_reversion`, ou le formulaire de l'interface.
 
 Les fenêtres des indicateurs, le multiplicateur d'ATR (0,2) et le seuil de volume (1,2) sont fixés dans le code.
 

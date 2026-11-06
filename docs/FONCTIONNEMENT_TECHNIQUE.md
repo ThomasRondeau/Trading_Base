@@ -155,7 +155,7 @@ Un test vérifie que le `on_bar` live de la stratégie la plus lourde (Cascade :
 
 ## 6. Stratégies
 
-Une stratégie déclare ses features, entraîne éventuellement ses modèles, et **émet uniquement des ordres d'entrée**. Les sorties ne sont pas de son ressort (voir §7).
+Une stratégie déclare ses features, entraîne éventuellement ses modèles, et **émet des ordres d'entrée** : un sens, et éventuellement une conviction entre 0 et 1. Le router décide de la quantité (§7.0) et exécute toutes les sorties (§7).
 
 | Nom CLI | Classe | Logique |
 |---|---|---|
@@ -166,7 +166,35 @@ Une stratégie déclare ses features, entraîne éventuellement ses modèles, et
 | `arima` | `ArimaStrategy` | trade si le mouvement prévu par l'ARIMA dépasse les frais aller-retour |
 | `pair` | `PairTradingStrategy` | z-score lissé du ratio de deux prix : vend l'actif surperformant et achète l'autre au-delà d'un seuil |
 
-Chaque stratégie a ses **paramètres de sortie** (classe de base `Strategy`), réglables avec `--param` (`trend.stop_atr=1.5`) ou dans la section « Sorties » de l'interface :
+### 6.1 Fiches de paramètres
+
+Chaque stratégie déclare une **fiche de paramètres** (`PARAMS`, `strategies/params.py`). Pour chaque paramètre, la fiche donne son nom, son type (`int`, `float`, `bool`, `choice`, `tuple`), sa valeur par défaut, ses bornes, son groupe et une aide en français. Les groupes sont : signal, indicateurs, modèle, cible, taille, sorties. Cette fiche est la référence unique :
+
+- **CLI** : `quantlab params --strategy NOM` liste tous les paramètres. `--param clé=valeur` s'applique à chaque stratégie sélectionnée qui déclare la clé, et `--param nom.clé=valeur` à une seule. `--params-file presets/X.json` charge un preset, et `--param` l'emporte sur lui. Une clé inconnue, un type invalide ou une valeur hors bornes donne une erreur qui liste les clés valides.
+- **Interface** : le formulaire de chaque stratégie est généré depuis la fiche, avec un onglet par groupe. Les erreurs et les avertissements s'affichent avant le lancement. On peut aussi charger un preset, l'enregistrer, ou revenir aux défauts.
+- **Optimisation** : une plage min / max / pas par paramètre numérique (`--range clé=min:max:pas`), ou une liste de valeurs (`--grid`).
+- **Sessions live** : les valeurs complètes sont enregistrées dans `session.json` et affichées sur la page Sessions.
+
+Pour un nombre optionnel, 0 (ou `none`) veut dire « aucun ». Des **règles de cohérence** lient plusieurs paramètres (`Strategy.check`) : MACD rapide < MACD lent, `training_margin` ≥ `horizon`, `exit_zscore` < `zscore_threshold`, pas de niveau ATR pour une paire, stop combiné et stop de jambe tous deux obligatoires pour une paire, etc. Une violation est une erreur. Un **avertissement** signale une combinaison permise mais douteuse : `holding_bars` différent de l'horizon des modèles ML veut dire qu'on ne garde pas les positions pendant la durée que les modèles prédisent.
+
+Les **presets** sont des fichiers JSON versionnés dans `presets/`, nommés `<stratégie>-<nom>.json` : `{"strategy": "trend", "params": {...}}`.
+
+Les valeurs par défaut reprennent exactement les anciennes valeurs en dur. Les tests vérifient que la fiche et le constructeur concordent, et que modifier chaque paramètre déclaré change bien la stratégie.
+
+Nombre de paramètres réglables, blocs communs compris (taille : 4 ; sorties : 6, ou 3 pour la paire) :
+
+| Stratégie | Paramètres |
+|---|---|
+| Trend | 12 |
+| Pair | 12 |
+| ARIMA | 13 |
+| Mean Reversion | 19 |
+| ML Hybrid | 32 |
+| Cascade | 47 |
+
+### 6.2 Paramètres de sortie
+
+Chaque stratégie a ses **paramètres de sortie** (classe de base `Strategy`), réglables avec `--param` (`trend.stop_atr=1.5`) ou dans l'onglet « Sorties » de l'interface :
 
 | Paramètre | Défaut | Rôle |
 |---|---|---|
@@ -176,11 +204,32 @@ Chaque stratégie a ses **paramètres de sortie** (classe de base `Strategy`), r
 | `atr_window` | 14 | fenêtre de cet ATR |
 | `holding_bars` | 5 | sortie au marché après ce nombre de barres (0 = aucune) |
 
+Pour une paire, le stop et l'objectif portent sur le P&L combiné, et les paramètres ATR n'existent pas.
+
 Une stratégie peut aussi ajuster le plan d'un signal précis : `mean_reversion` avec `target_middle_band=true` vise la bande de Bollinger médiane du moment. Elle peut enfin demander la fermeture de ses propres positions (`close_positions()`) : `pair` le fait quand le z-score revient sous `exit_zscore`. Elle peut également remplir `diagnostics` (par exemple ses prédictions), qui est enregistré dans le journal à chaque barre.
 
 ---
 
 ## 7. Exécution des ordres
+
+### 7.0 Taille des positions (`execution/sizing.py`)
+
+La stratégie dit seulement « acheter / vendre », avec une conviction entre 0 et 1 (`self.order(side, conviction=...)`). Sa **règle de taille** (`Sizing`) est construite à partir de ses paramètres de taille et figée dans l'ordre. Le router l'applique au close du signal, avant le contrôle de risque :
+
+| `size_mode` | Quantité |
+|---|---|
+| `fixed` (défaut) | `quantity` actions × conviction, au moins 1 (10 par défaut, 5 pour ARIMA) |
+| `notional` | `size_value` $ ÷ prix |
+| `equity_pct` | `size_value` % du capital ÷ prix |
+| `risk` | perte au stop limitée à `size_value` % du capital : risque $ ÷ distance au stop. La distance est plafonnée par le bas à `size_min_stop_pct` % du prix (0,1 %), pour qu'un stop minuscule ne donne pas une taille énorme |
+
+- La conviction de Cascade vaut min(|amplitude prévue| / 5 %, 1). En mode `fixed`, sa quantité reste celle d'avant : max(1, ⌊10 × conviction⌋).
+- **Paire** : le groupe est dimensionné en entier, avec **le même notionnel sur chaque jambe**.
+  - En mode `fixed`, la première jambe prend `quantity` actions, et la seconde le même montant en dollars.
+  - En mode `risk`, le risque est divisé par le stop combiné.
+  - Si une jambe arrondit à 0 action, le groupe est refusé.
+- Une taille qui arrondit à 0 refuse l'entrée. Les limites du `RiskManager` (§8) s'appliquent ensuite, et peuvent encore réduire l'ordre.
+- Un ordre passé avec une quantité explicite (`self.order(side, 3)`) est envoyé tel quel.
 
 ### 7.1 Ordres et lots
 
@@ -215,7 +264,7 @@ Les entrées qui partagent un `group_id` forment un **groupe** : ce sont les deu
 
 - **Tout ou rien** : si le contrôle de risque refuse ou réduit une jambe, aucune n'est envoyée, ce qui évite une paire déséquilibrée.
 - **Sortie commune** : le stop et l'objectif du plan s'appliquent au **P&L combiné** des jambes, en fraction de leur notionnel brut d'entrée. Ils sont vérifiés à chaque clôture de barre, et toutes les jambes sortent ensemble au marché. La sortie au temps et la sortie demandée par la stratégie ferment aussi tout le groupe.
-- **Stop de jambe** : un ordre posé chez le broker ne peut pas surveiller un spread. Chaque jambe porte donc seulement un stop large (`leg_stop`, `leg_stop_pct` = 5 % pour `pair`), qui la protège si l'application tombe. S'il s'exécute, l'autre jambe est fermée aussitôt (`leg_stop`).
+- **Stop de jambe** : un ordre posé chez le broker ne peut pas surveiller un spread. Chaque jambe porte donc seulement un stop large (`leg_stop`, `leg_stop_pct` = 5 % pour `pair`), qui la protège si l'application tombe. S'il s'exécute, l'autre jambe est fermée aussitôt (`leg_stop`). Une paire doit avoir **les deux stops** : le stop combiné, qui est le vrai stop de la paire, et le stop de jambe en plus. Sinon l'entrée est refusée (`RiskLimits.require_stop`), et la fiche de `pair` refuse `stop_loss_pct` ou `leg_stop_pct` à 0. Si le stop de jambe est plus serré que le stop combiné, un avertissement s'affiche : il pourrait se déclencher sur un mouvement commun du marché, alors que la paire est à plat.
 - **Jambe manquante** : si l'entrée d'une jambe est rejetée ou annulée sans exécution, les autres jambes sont fermées (`leg_missing`).
 
 ### 7.2 Le broker simulé
@@ -343,7 +392,7 @@ Chaque session a son dossier `sessions/<nom>/` :
 
 | Fichier | Contenu |
 |---|---|
-| `session.json` | mode, symboles, capital, limites de risque, coûts simulés |
+| `session.json` | mode, symboles, capital, limites de risque, coûts simulés, paramètres complets de chaque stratégie |
 | `strategies.pkl` | les stratégies **juste après l'entraînement** : modèles et buffers |
 | `warmup.parquet` | l'historique d'entraînement |
 | `journal.sqlite` | tout ce qui s'est passé (voir ci-dessous) |

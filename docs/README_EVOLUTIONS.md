@@ -1,5 +1,24 @@
 # Historique des évolutions
 
+## Novembre 2026 : sorties par position, taille des positions et paramètres réglables
+
+- **Sorties par position** : chaque entrée porte son plan de sortie (`ExitPlan`), avec un stop et un objectif en %, en multiples d'ATR ou en prix absolu, et une durée maximale. Le plan est figé dans le lot. Une entrée sans stop est refusée. Une stratégie peut fermer ses propres positions (`close_positions`).
+- **Paire en groupe** : les deux jambes sont envoyées ensemble ou pas du tout. Elles sont fermées ensemble, sur le z-score, la durée, ou le stop / objectif du P&L combiné. Un stop large reste posé chez le broker sur chaque jambe.
+- **Taille des positions dans le router** : modes `fixed`, `notional`, `equity_pct` et `risk` (perte au stop limitée à un % du capital), avec la conviction de la stratégie. Les deux jambes d'une paire ont désormais le même notionnel.
+- **Fiches de paramètres** : tout ce qui était écrit en dur est devenu réglable, avec un type, des bornes et une aide (indicateurs, seuils, hyperparamètres, cible, taille, sorties). Sont concernés `--param` validé, `quantlab params`, les presets versionnés dans `presets/`, `optimize --range`, des formulaires générés dans l'interface, et les paramètres enregistrés dans les sessions.
+- Les `--stop-loss` / `--take-profit` globaux sont supprimés. Au passage, un bug de la CLI est corrigé : les backtests appliquaient sans le dire les limites de risque du mode `paper`.
+- **Effet sur les résultats** : les valeurs par défaut reprennent les anciennes valeurs, donc rien ne change, sauf pour la paire.
+
+| Paire (AAPL / MSFT) | Avant | Après |
+|---|---|---|
+| Trades (jambes) | 56 | 56 |
+| Rendement | +0,081 % | +0,108 % |
+| Profit factor | 1,36 | 1,64 |
+| Drawdown max | −0,10 % | −0,076 % |
+
+  Ces écarts viennent de la sortie sur le z-score et du même notionnel par jambe.
+
+
 Ce document retrace les grandes évolutions du projet, de la version scolaire à l'outil actuel. Pour le fonctionnement actuel, voir [FONCTIONNEMENT_TECHNIQUE.md](FONCTIONNEMENT_TECHNIQUE.md) ; pour le code, voir [GUIDE_DU_CODE.md](GUIDE_DU_CODE.md).
 
 ---
@@ -74,7 +93,7 @@ Les taux de réussite publiés en avril 2026 (voir ci-dessous) **ne sont plus va
 | Stratégie | Trades | Taux de réussite | Profit factor | Rendement |
 |---|---|---|---|---|
 | Cascade | 25 | 52,0 % | 1,22 | +0,0014 % |
-| Pair trading (AAPL/MSFT en 2 min) | 56 | 42,9 % | 1,36 | +0,081 % |
+| Pair trading (AAPL/MSFT en 2 min) | 56 | 42,9 % | 1,36 | +0,081 % (+0,108 % depuis la taille à notionnel égal, voir plus haut) |
 | ARIMA | 18 | 44,4 % | 1,00 | ≈ 0 % |
 | Mean reversion | 21 | 42,9 % | 0,35 | −0,056 % |
 | ML Hybrid | 31 | 38,7 % | 0,26 | −0,125 % |

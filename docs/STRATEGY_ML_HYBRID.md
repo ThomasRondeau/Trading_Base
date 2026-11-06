@@ -24,7 +24,7 @@ Le déclencheur est proche de celui de la [Mean Reversion](STRATEGY_MEAN_REVERSI
   - ATR / prix ;
   - momentum sur 5, 10 et 20 barres.
 - **Règle** :
-  - un achat candidat n'est exécuté (10 actions) que si le modèle prédit la hausse ;
+  - un achat candidat n'est exécuté (10 actions par défaut) que si le modèle prédit la hausse ;
   - une vente candidate n'est exécutée que s'il prédit la baisse ;
   - sinon, le signal est abandonné.
 - La prédiction est journalisée à chaque barre (`diagnostics = {"direction_up": …}`), ce qui permet de l'analyser après une session live.
@@ -42,6 +42,13 @@ Le déclencheur est proche de celui de la [Mean Reversion](STRATEGY_MEAN_REVERSI
 | Paramètre | Défaut | Exemple |
 |---|---|---|
 | `max_depth` | 4 | `--param max_depth=3` |
+| `n_estimators`, `learning_rate`, `subsample`, `colsample_bytree`, `random_state` | 100, 0,05, 0,8, 0,8, 42 | `--param learning_rate=0.03` |
+| `rsi_buy`, `rsi_sell`, `volume_threshold` | 35, 65, 1,1 | `--param rsi_buy=30 --param rsi_sell=70` |
+| `horizon`, `training_margin` | 5, 30 | `--param horizon=10 --param training_margin=40` |
+| fenêtres des indicateurs et des features composites | RSI 14, Bollinger 20 / 2, volume 20, MACD 12/26/9… | `--param rsi_window=21` |
+| taille (`size_mode`, `quantity`, `size_value`) | fixed, 10, aucun | `--param size_mode=risk --param size_value=0.5` |
+
+Tous les paramètres (indicateurs, seuils, taille, sorties) : `quantlab params --strategy ml_hybrid`, ou le formulaire de l'interface.
 
 ## 5. Résultats actuels
 

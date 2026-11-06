@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 
 from quantlab.execution.exits import ExitPlan
+from quantlab.execution.sizing import Sizing
 
 
 class Side(str, Enum):
@@ -60,6 +61,10 @@ class Order:
     exit_plan: ExitPlan | None = None
     #: entries only: orders sharing a group (the legs of a pair) are risk-checked and closed together
     group_id: str | None = None
+    #: entries only: the rule the router sizes the order with (None: `quantity` as given)
+    sizing: Sizing | None = None
+    #: entries only: 0-1 multiplier of the size (e.g. a model's confidence)
+    conviction: float = 1.0
 
     def __post_init__(self) -> None:
         if self.quantity <= 0:
@@ -77,11 +82,18 @@ class Order:
             "side": self.side.value,
             "order_type": self.order_type.value,
             "exit_plan": self.exit_plan.to_dict() if self.exit_plan else None,
+            "sizing": self.sizing.to_dict() if self.sizing else None,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Order:
-        return cls(**{**data, "exit_plan": ExitPlan.from_dict(data.get("exit_plan"))})
+        return cls(
+            **{
+                **data,
+                "exit_plan": ExitPlan.from_dict(data.get("exit_plan")),
+                "sizing": Sizing.from_dict(data.get("sizing")),
+            }
+        )
 
 
 @dataclass(frozen=True)

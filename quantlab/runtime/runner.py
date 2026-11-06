@@ -129,6 +129,8 @@ class StrategyRunner:
                         "sent_quantity": sent.quantity if sent else 0,
                         "group_id": order.group_id,
                         **plan,
+                        **(order.sizing.describe() if order.sizing else {}),
+                        "conviction": order.conviction,
                     }
                     self.journal.event("signal", signal, strategy.strategy_id)
         latency = (time.perf_counter() - start) * 1e3
@@ -223,8 +225,10 @@ class StrategyRunner:
             self.state_store.save(self.get_state())
 
     def _mark(self, bar: pd.Series) -> None:
+        # held symbols, and the strategies' ones: the router sizes new entries at these closes
+        symbols = dict.fromkeys([*self.portfolio.positions, *(s for st in self.strategies for s in st.symbols)])
         prices = {}
-        for symbol in self.portfolio.positions:
+        for symbol in symbols:
             try:
                 price = bar_value(bar, symbol, "close")
             except KeyError:

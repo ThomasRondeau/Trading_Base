@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pandas as pd
@@ -9,7 +9,8 @@ from quantlab.execution.exits import ExitPlan, Level
 from quantlab.execution.orders import Order, Side
 from quantlab.features.base import Feature
 from quantlab.features.technical import SMA, Ratio, ZScore
-from quantlab.strategies.base import Strategy
+from quantlab.strategies.base import Strategy, exit_sheet, size_sheet
+from quantlab.strategies.params import Param
 
 
 class PairTradingStrategy(Strategy):
@@ -21,7 +22,43 @@ class PairTradingStrategy(Strategy):
     within `exit_zscore`, on the time exit, or when the pair's combined P&L reaches `stop_loss_pct` /
     `take_profit_pct` of its gross notional (checked at each bar close). Each leg also carries a wide
     protective stop at the broker (`leg_stop_pct`); when it fires, the other leg is closed at once.
+
+    The legs always hold the same notional (the router sizes the group): in fixed mode, `quantity` shares of
+    the first symbol and the same dollar amount of the second, so the pair trades the ratio, not the prices.
     """
+
+    is_group = True
+    PARAMS = (
+        Param("zscore_threshold", "float", 2.2, "Entrée quand |z-score| du ratio des prix dépasse ce seuil.",
+              "signal", min=0.01, max=20),
+        Param("exit_zscore", "float", 0.5, "Sortie quand |z-score| revient sous ce seuil. 0 = aucune.",
+              "sorties", min=0, max=20, optional=True),
+        Param("leg_stop_pct", "float", 5.0, "Stop de chaque jambe chez le broker, en % (filet si l'application "
+              "tombe ; plus large que le stop combiné). Obligatoire.", "sorties",
+              min=0.01, max=100),
+        Param("zscore_window", "int", 30, "Fenêtre du z-score du ratio.", "indicateurs", min=2, max=5000),
+        Param("smoothing_window", "int", 3, "Lissage du z-score (moyenne mobile).", "indicateurs", min=1, max=500),
+        *size_sheet(group=True),
+        *exit_sheet(group=True),
+    )  # fmt: skip
+
+    @classmethod
+    def check(cls, values: Mapping[str, Any]) -> list[str]:
+        errors = []
+        if values["exit_zscore"] is not None and values["exit_zscore"] >= values["zscore_threshold"]:
+            errors.append("exit_zscore must be smaller than zscore_threshold (the pair would exit at once).")
+        if values.get("stop_atr") or values.get("take_profit_atr"):
+            errors.append("Pair trading: the stop / target apply to the combined P&L, in percent (no ATR).")
+        if not values["stop_loss_pct"] or not values["leg_stop_pct"]:
+            errors.append("Pair trading needs a combined stop (stop_loss_pct) and a leg stop (leg_stop_pct).")
+        return errors
+
+    @classmethod
+    def warnings(cls, values: Mapping[str, Any]) -> list[str]:
+        if values["leg_stop_pct"] and values["stop_loss_pct"] and values["leg_stop_pct"] <= values["stop_loss_pct"]:
+            return [f"leg_stop_pct ({values['leg_stop_pct']}) <= stop_loss_pct ({values['stop_loss_pct']}): a leg "
+                    "stop can fire on a common market move while the pair itself is flat."]  # fmt: skip
+        return []
 
     def __init__(
         self,
@@ -49,6 +86,10 @@ class PairTradingStrategy(Strategy):
         # Smoothed over a few bars to avoid reacting to spikes
         self.zscore = SMA(smoothing_window, source=ZScore(ratio, zscore_window))
 
+    @property
+    def symbols(self) -> tuple[str, ...]:
+        return (self.symbol_a, self.symbol_b)
+
     def features(self) -> Sequence[Feature]:
         return (self.zscore,)
 
@@ -69,5 +110,8 @@ class PairTradingStrategy(Strategy):
             holding_bars=self.holding_bars,
             leg_stop=self.leg_stop_pct / 100 if self.leg_stop_pct else None,
         )
-        legs = [self.order(side_a, 10, self.symbol_a, plan), self.order(side_b, 10, self.symbol_b, plan)]
+        legs = [
+            self.order(side_a, symbol=self.symbol_a, exit_plan=plan),
+            self.order(side_b, symbol=self.symbol_b, exit_plan=plan),
+        ]
         return self.group(legs, plan)

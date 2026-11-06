@@ -22,8 +22,13 @@ def test_parse_value() -> None:
 
 
 def test_parse_params_global_and_targeted() -> None:
-    params = parse_params(["holding=3", "trend.sma_fast=8"], ["trend", "mean_reversion"])
-    assert params == {"trend": {"holding": 3, "sma_fast": 8}, "mean_reversion": {"holding": 3}}
+    params = parse_params(["holding_bars=3", "trend.sma_fast=8"], ["trend", "mean_reversion"])
+    assert params == {"trend": {"holding_bars": 3, "sma_fast": 8}, "mean_reversion": {"holding_bars": 3}}
+    # a global key goes only to the strategies that declare it, and must be declared by one
+    params = parse_params(["bb_window=30"], ["trend", "mean_reversion"])
+    assert params == {"trend": {}, "mean_reversion": {"bb_window": 30}}
+    with pytest.raises(argparse.ArgumentTypeError, match="no selected strategy"):
+        parse_params(["holding=3"], ["trend"])
     with pytest.raises(argparse.ArgumentTypeError):
         parse_params(["cascade.x=1"], ["trend"])
     with pytest.raises(argparse.ArgumentTypeError):
@@ -32,6 +37,18 @@ def test_parse_params_global_and_targeted() -> None:
 
 def test_parse_grid() -> None:
     assert parse_grid(["sma_fast=5,10", "sma_slow=30"]) == {"sma_fast": [5, 10], "sma_slow": [30]}
+
+
+def test_parse_ranges_are_checked_by_the_sheet() -> None:
+    from quantlab.cli import parse_ranges
+
+    assert parse_ranges(["sma_fast=5:20:5", "stop_atr=1:2:0.5"], "trend") == {
+        "sma_fast": [5, 10, 15, 20],
+        "stop_atr": [1.0, 1.5, 2.0],
+    }
+    for bad in ("sma_fast=5:20", "nope=1:2:1", "sma_fast=0:4:1", "size_mode=1:2:1", "sma_fast=1:5000:1"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            parse_ranges([bad], "trend")
 
 
 def test_split_by_days_and_fraction() -> None:

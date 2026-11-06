@@ -199,6 +199,18 @@ def test_mean_reversion_can_target_the_middle_band() -> None:
 # --- groups (pairs) ----------------------------------------------------------------------------------------
 
 
+#: router mechanics of groups without leg stops (a pair strategy always has one, see the tests below)
+NO_LEG_STOP = RiskLimits(require_stop=False)
+
+
+def test_group_needs_a_combined_stop_and_a_leg_stop() -> None:
+    for plan in (ExitPlan(leg_stop=0.05), ExitPlan(stop=Level.pct(0.01))):
+        router, broker = make_router()
+        assert router.submit_entries(pair_orders(plan)) == [None, None] and broker.pending_orders == []
+    router, _ = make_router()
+    assert all(router.submit_entries(pair_orders(ExitPlan(stop=Level.pct(0.01), leg_stop=0.05))))
+
+
 def test_group_is_refused_as_a_whole_when_one_leg_fails_the_risk_checks() -> None:
     router, broker = make_router(RiskLimits(max_order_quantity=8))
     sent = router.submit_entries(pair_orders(ExitPlan(stop=Level.pct(0.01)), quantity_a=5, quantity_b=10))
@@ -207,7 +219,7 @@ def test_group_is_refused_as_a_whole_when_one_leg_fails_the_risk_checks() -> Non
 
 
 def test_group_combined_stop_closes_both_legs() -> None:
-    router, broker = make_router()
+    router, broker = make_router(NO_LEG_STOP)  # combined stop only: nothing at the broker
     plan = ExitPlan(stop=Level.pct(0.005), target=Level.pct(0.01))
     assert all(router.submit_entries(pair_orders(plan)))
     broker.on_bar(pair_bar(1, flat(100), flat(100)))
@@ -226,7 +238,7 @@ def test_group_combined_stop_closes_both_legs() -> None:
 
 
 def test_group_target_and_time_exit_close_both_legs_together() -> None:
-    router, broker = make_router()
+    router, broker = make_router(NO_LEG_STOP)
     router.submit_entries(pair_orders(ExitPlan(stop=Level.pct(0.5), target=Level.pct(0.01))))
     broker.on_bar(pair_bar(1, flat(100), flat(100)))
     router.portfolio.mark({"A": 101.0, "B": 99.0})  # +10 + 10 = 1 % of 2000
@@ -234,7 +246,7 @@ def test_group_target_and_time_exit_close_both_legs_together() -> None:
     broker.on_bar(pair_bar(2, flat(101), flat(99)))
     assert {t.reason for t in router.trades} == {"take_profit"} and len(router.trades) == 2
 
-    router, broker = make_router()
+    router, broker = make_router(NO_LEG_STOP)
     router.submit_entries(pair_orders(ExitPlan(stop=Level.pct(0.5), holding_bars=2)))
     for i in (1, 2, 3):
         broker.on_bar(pair_bar(i, flat(100), flat(100)))
@@ -262,7 +274,7 @@ def test_leg_stop_at_the_broker_closes_the_other_leg() -> None:
 def test_leg_not_filled_closes_the_other_leg() -> None:
     broker = ManualBroker()
     router = OrderRouter(broker, Portfolio(), RiskManager())
-    leg_a, leg_b = router.submit_entries(pair_orders(ExitPlan(stop=Level.pct(0.01))))
+    leg_a, leg_b = router.submit_entries(pair_orders(ExitPlan(stop=Level.pct(0.01), leg_stop=0.05)))
     assert leg_a is not None and leg_b is not None and broker.on_status is not None
     broker.fill(leg_a, 10, 100.0)
     broker.on_status(leg_b.order_id, OrderStatus.REJECTED, "not shortable")

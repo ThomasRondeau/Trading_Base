@@ -43,6 +43,27 @@ def pair() -> pd.DataFrame:
 
 PIPELINES: dict[str, tuple[str, list[Feature]]] = {
     "cascade": ("aapl", list(CascadeStrategy().features())),
+    # non-default windows of every composite set and of the base indicators
+    "cascade_custom": (
+        "aapl",
+        list(
+            CascadeStrategy(
+                amplitude_momentum=8,
+                momentum_windows=(3, 7, 30),
+                slope_window=5,
+                atr_mean_window=30,
+                atr_change_window=6,
+                volume_fast_window=3,
+                volume_slow_window=40,
+                accel_window=7,
+                rsi_window=9,
+                bb_window=30,
+                macd_fast=8,
+                macd_slow=30,
+                sma_window=40,
+            ).features()
+        ),
+    ),
     "ml_hybrid": ("aapl", list(MLHybridStrategy().features())),
     "mean_reversion": ("aapl", list(MeanReversionStrategy().features())),
     "trend_following": ("aapl", list(TrendFollowingStrategy(10, 50).features())),

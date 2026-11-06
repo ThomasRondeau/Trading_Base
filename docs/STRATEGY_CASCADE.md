@@ -38,7 +38,7 @@ Ces colonnes sont pour la plupart sans unité (rapportées au prix ou à l'ATR),
 2. On lit la direction (hausse ou baisse) et l'amplitude prédite, en %.
 3. Il faut \|amplitude\| ≥ `min_amplitude_threshold`, soit 0,05 % par défaut, dans la même unité que les cibles.
 4. Le signe de l'amplitude doit être cohérent avec la direction.
-5. Si tout concorde, la stratégie achète (hausse) ou vend (baisse) `max(1, int(min(|amplitude| / 5, 1) × 10))` actions.
+5. Si tout concorde, la stratégie achète (hausse) ou vend (baisse) avec une conviction min(|amplitude| / `conviction_cap_pct`, 1), le plafond valant 5 % par défaut. Le router en tire la taille : en mode `fixed`, `max(1, int(conviction × quantity))` actions, avec `quantity` = 10 par défaut.
 
 Les trois prédictions sont journalisées à chaque barre (`opportunity`, `direction_up`, `amplitude_pct`). La sortie est gérée par l'`OrderRouter` : après 5 barres, ou au stop loss à −2 % ou au take profit à +5 %.
 
@@ -54,6 +54,15 @@ Les trois prédictions sont journalisées à chaque barre (`opportunity`, `direc
 | Paramètre | Défaut | Exemple |
 |---|---|---|
 | `min_amplitude_threshold` | 0,05 (%) | `--param min_amplitude_threshold=0.1` |
+| `conviction_cap_pct` | 5 (%) | `--param conviction_cap_pct=2` |
+| hyperparamètres (`amplitude_*`, `direction_*`, `opportunity_*`), `random_state` | voir §1 | `--param direction_max_depth=3` |
+| cible (`horizon`, `opportunity_threshold_pct`, `training_margin`, `cv_folds`) | 5, 0,05, 30, 5 | `--param horizon=10 --param training_margin=40` |
+| fenêtres des indicateurs et des features composites | voir §2 | `--param momentum_windows=3,7,30` |
+| taille (`size_mode`, `quantity`, `size_value`) | fixed, 10, aucun | `--param size_mode=risk --param size_value=0.5` |
+
+Tous les paramètres (indicateurs, seuils, taille, sorties) : `quantlab params --strategy cascade`, ou le formulaire de l'interface.
+
+Changer `horizon` sans `holding_bars` donne un avertissement : les positions ne seraient pas gardées pendant la durée que les modèles prédisent. Le preset `presets/cascade-horizon-10.json` change les deux.
 
 ## 6. Résultats actuels
 

@@ -181,13 +181,16 @@ class OrderRouter:
         return [sent[order.order_id] for order in orders]
 
     def submit_entry(self, order: Order) -> Order | None:
-        """Risk-check `order` and send it; returns the order actually sent (None if refused)."""
+        """Size, risk-check and send `order`; returns the order actually sent (None if refused)."""
         if order.group_id is not None:
             return self._submit_group([order])[0]
         plan = order.exit_plan or ExitPlan()
         if not self._stop_ok(order, plan):
             return None
-        checked = self.risk.check_entry(order, self.exposure(order.symbol))
+        sized = self._size(order, plan)
+        if sized is None:
+            return None
+        checked = self.risk.check_entry(sized, self.exposure(order.symbol))
         if checked is None:
             return None
         self._open(checked, plan)
@@ -335,10 +338,40 @@ class OrderRouter:
         return round(round(price / self.tick_size) * self.tick_size, 10)
 
     def _stop_ok(self, order: Order, plan: ExitPlan) -> bool:
-        if self.risk.limits.require_stop and plan.stop is None:
+        if not self.risk.limits.require_stop:
+            return True
+        if plan.stop is None:
             logger.warning("Entry refused, its exit plan has no stop (RiskLimits.require_stop): %s", order)
             return False
+        # a group needs its combined stop (checked by the router) and, on top, a leg stop at the broker,
+        # which still protects each leg if the application is down
+        if order.group_id is not None and plan.leg_stop is None:
+            logger.warning("Group entry refused, its exit plan has no leg stop (RiskLimits.require_stop): %s", order)
+            return False
         return True
+
+    def _size(self, order: Order, plan: ExitPlan) -> Order | None:
+        """`order` with the quantity of its sizing rule, at the signal's close (None: too small to trade)."""
+        if order.sizing is None:
+            return order
+        price = self.portfolio.last_prices.get(order.symbol, float("nan"))
+        quantity = order.sizing.quantity_for(order.side.sign, price, self.portfolio.equity, plan, order.conviction)
+        if quantity <= 0:
+            logger.info("Entry refused, its size rounds to 0 shares (%s at %s): %s", order.sizing, price, order)
+            return None
+        return order if quantity == order.quantity else dataclasses.replace(order, quantity=quantity)
+
+    def _size_group(self, legs: Sequence[Order], plan: ExitPlan) -> list[Order] | None:
+        """The legs with the same notional each (None: a leg rounds to 0 shares)."""
+        sizing = legs[0].sizing
+        if sizing is None:
+            return list(legs)
+        prices = [self.portfolio.last_prices.get(leg.symbol, float("nan")) for leg in legs]
+        quantities = sizing.group_quantities(prices, self.portfolio.equity, plan, legs[0].conviction)
+        if any(q <= 0 for q in quantities):
+            logger.info("Group %s refused, a leg rounds to 0 shares (prices %s)", legs[0].group_id, prices)
+            return None
+        return [dataclasses.replace(leg, quantity=q) for leg, q in zip(legs, quantities, strict=True)]
 
     def _open(self, order: Order, plan: ExitPlan) -> None:
         lot = Lot(
@@ -353,13 +386,16 @@ class OrderRouter:
         refused: list[Order | None] = [None] * len(legs)
         if not self._stop_ok(legs[0], plan):
             return refused
-        checked = [self.risk.check_entry(leg, self.exposure(leg.symbol)) for leg in legs]
-        if any(c is None or c.quantity != leg.quantity for c, leg in zip(checked, legs, strict=True)):
+        sized = self._size_group(legs, plan)
+        if sized is None:
+            return refused
+        checked = [self.risk.check_entry(leg, self.exposure(leg.symbol)) for leg in sized]
+        if any(c is None or c.quantity != leg.quantity for c, leg in zip(checked, sized, strict=True)):
             logger.warning("Group %s refused: every leg must pass the risk checks unchanged", legs[0].group_id)
             return refused
-        for leg in legs:
+        for leg in sized:
             self._open(leg, plan)
-        return list(legs)
+        return list(sized)
 
     def _group(self, group_id: str) -> list[Lot]:
         return [lot for lot in self.lots.values() if lot.group_id == group_id]

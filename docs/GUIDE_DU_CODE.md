@@ -145,6 +145,8 @@ Une `Source` est soit le nom d'une colonne brute (`"close"`), soit une feature �
 | `stop_loss_pct`, `take_profit_pct` | stop et objectif en % du prix d'entrée (2 et 5 ; 0 / `None` = aucun) — paramètres du constructeur |
 | `stop_atr`, `take_profit_atr`, `atr_window` | niveaux en multiples d'ATR mesuré au signal, à la place des % (ATR ajouté automatiquement aux features) |
 | `holding_bars` | durée de détention avant la sortie au marché (5 ; 0 / `None` = seulement stop / objectif) — paramètre du constructeur |
+| `size_mode`, `quantity`, `size_value`, `size_min_stop_pct` | règle de taille appliquée par le router (`execution/sizing.py`) : `fixed` 10 actions par défaut, `notional`, `equity_pct` ou `risk` — paramètres du constructeur |
+| `PARAMS`, `is_group` | fiche de paramètres (§4.3 bis) ; `True` pour une stratégie dont les entrées sont des groupes (paire) |
 | `min_history` | barres brutes lues via `feed.bars(n)` en plus du warmup des features |
 | `diagnostics` | dictionnaire remis à zéro à chaque barre ; journalisé (ex. prédictions) |
 
@@ -154,9 +156,20 @@ Fourni par la base :
 - `prepare(barres)` : précalcul pour le backtest ;
 - `start()` et `stop()` ; `on_bar(bar)` filtre arrêt et warmup puis appelle `decide` ;
 - `get_state()` et `set_state()` ;
-- `order(side, qty, symbol=None)` construit un `Order` attribué à la stratégie.
+- `order(side, quantity=None, symbol=None, exit_plan=None, conviction=1.0)` construit un `Order` attribué à la stratégie. Sans `quantity`, il porte la règle de taille `sizing()`, que le router applique (× `conviction`, entre 0 et 1) ; avec une quantité, l'ordre est envoyé tel quel ;
+- `symbols` : les symboles tradés, dont le close est marqué avant chaque décision (le router y dimensionne les entrées).
 
 Un `strategy_id` vaut le nom de la classe par défaut. Il doit être unique dans un runner : passer `strategy_id=…` pour faire tourner deux instances.
+
+### 4.3 bis Fiches de paramètres (`strategies/params.py`)
+
+- `PARAMS` (attribut de classe) : tuple de `Param(nom, type, défaut, aide, groupe, min=, max=, choices=, optional=)`. La base fournit les blocs communs `size_sheet()` et `exit_sheet()` (`Strategy.PARAMS`), et chaque stratégie les étend : `PARAMS = (Param(...), ..., *Strategy.PARAMS)`.
+  - Pour changer un défaut commun : `with_defaults(Strategy.PARAMS, quantity=5)`, en passant aussi `quantity=5` au constructeur.
+  - Pour une paire : `size_sheet(group=True)` et `exit_sheet(group=True)`, qui ne contient pas les paramètres ATR.
+- `check(values)` (méthode de classe) : erreurs qui lient plusieurs valeurs ; `warnings(values)` : avertissements.
+- `StrategySpec.build` (`registry.py`) valide les valeurs (types, bornes, règles) avant d'appeler le constructeur, puis range les valeurs complètes dans `strategy.params`, que les sessions enregistrent. La CLI et l'interface passent toutes les deux par là.
+- Blocs ML réutilisables : `strategies/ml_params.py` (`indicator_params`, `target_params`, `xgb_params(prefixe, modèle)`, `forest_params`, `check_ml`, `warn_ml`).
+- Presets : `save_preset` / `load_preset` ; plages : `param_range(param, min, max, pas)`.
 
 ### 4.4 Ordres (`execution/orders.py`)
 
@@ -253,9 +266,16 @@ Dans `strategies/breakout.py` :
 class BreakoutStrategy(Strategy):
     """Buy when the close breaks above its moving average by k ATRs (and vice versa)."""
 
-    def __init__(self, window: int = 20, k: float = 2.0, symbol: str = "AAPL", **kwargs: Any) -> None:
-        kwargs.setdefault("holding_bars", 10)  # exit parameters: see Strategy.__init__
-        super().__init__(symbol=symbol, **kwargs)
+    PARAMS = (
+        Param("window", "int", 20, "Fenêtre de la moyenne mobile.", "indicateurs", min=2, max=1000),
+        Param("k", "float", 2.0, "Cassure à k ATR de la moyenne.", "signal", min=0, max=20),
+        *with_defaults(Strategy.PARAMS, holding_bars=10),  # base size and exit parameters
+    )
+
+    def __init__(
+        self, window: int = 20, k: float = 2.0, symbol: str = "AAPL", holding_bars: int | None = 10, **kwargs: Any
+    ) -> None:
+        super().__init__(symbol=symbol, holding_bars=holding_bars, **kwargs)
         self.k = k
         self.sma, self.atr = SMA(window), ATR(14)
 
@@ -266,23 +286,24 @@ class BreakoutStrategy(Strategy):
         row = self.feed.row()
         mid, band = row[self.sma.name], self.k * row[self.atr.name]
         if bar["close"] > mid + band:
-            return [self.order(Side.BUY, 10)]
+            return [self.order(Side.BUY)]  # quantity: the size parameters, applied by the router
         if bar["close"] < mid - band:
-            return [self.order(Side.SELL, 10)]
+            return [self.order(Side.SELL)]
         return []
 ```
 
 Ensuite :
 
 1. L'enregistrer dans `strategies/registry.py` : `"breakout": StrategySpec(BreakoutStrategy)`. Ajouter `n_symbols=2` pour une stratégie à deux actifs, et `live_history="10 D"` si elle entraîne un modèle.
-2. Elle est alors disponible partout : `quantlab backtest --strategy breakout --param k=1.5`, `optimize`, `paper`.
+2. Elle est alors disponible partout : `quantlab backtest --strategy breakout --param k=1.5`, `quantlab params --strategy breakout`, `optimize --range k=1:3:0.5`, `paper`, et dans l'interface, avec un formulaire généré depuis `PARAMS`. `tests/test_params.py` vérifie que la fiche et le constructeur concordent.
 3. Ajouter un cas dans `tests/test_characterization.py` (puis `UPDATE_BASELINE=1`, voir §7) et ses features dans `tests/test_features.py`.
 
 Points d'attention :
 
 - n'utiliser que `self.feed`, c'est-à-dire les données jusqu'à la barre courante ; jamais de DataFrame global ;
-- les sorties viennent du plan de sortie de chaque entrée, construit par `exit_plan()` à partir des paramètres de sortie. Pour un niveau propre au signal : `self.order(side, qty, exit_plan=replace(self.exit_plan(), target=Level.at(prix)))`. Pour fermer ses positions sur un signal : `self.close_positions(reason="...")`. Pour une paire : `self.group([jambe_a, jambe_b], plan)`. Le router exécute toutes les sorties ;
-- pour un modèle ML, implémenter `train(history)` comme dans `MLHybridStrategy`, avec `drop_last` au moins égal à l'horizon de la cible ;
+- les sorties viennent du plan de sortie de chaque entrée, construit par `exit_plan()` à partir des paramètres de sortie. Pour un niveau propre au signal : `self.order(side, exit_plan=replace(self.exit_plan(), target=Level.at(prix)))`. Pour fermer ses positions sur un signal : `self.close_positions(reason="...")`. Pour une paire : `self.group([jambe_a, jambe_b], plan)`. Le router exécute toutes les sorties ;
+- pour un modèle ML, implémenter `train(history)` comme dans `MLHybridStrategy`, avec `drop_last` au moins égal à l'horizon de la cible. Exposer les hyperparamètres avec les blocs de `strategies/ml_params.py`, et la marge avec `training_margin`, que `check_ml` vérifie ;
+- une valeur nouvelle lue dans `decide` doit aussi avoir une valeur de classe (ex. `volume_threshold: float = 1.2`), sinon les stratégies sauvées (pickle) avant ce changement ne pourront plus reprendre une session ;
 - pour la latence live, garder des prédictions sur une seule ligne (`SklearnModel.predict_row`) ; budget : 100 ms par barre.
 
 ### 5.3 Ajouter un modèle
@@ -319,7 +340,7 @@ Implémenter le protocole `Broker` (§4.5) :
 
 L'interface (`quantlab/ui/app.py`) n'a pas de logique propre : chaque page appelle les mêmes fonctions que la CLI. Pour ajouter une fonctionnalité, l'écrire dans la bibliothèque, puis brancher la commande CLI **et** la page.
 
-- Les paramètres d'une stratégie sont lus automatiquement dans la signature de son constructeur (`strategy_signature`). Une nouvelle stratégie enregistrée dans `registry.py` apparaît donc dans toutes les pages sans code d'interface, avec un champ libre `clé=valeur` en plus.
+- Le formulaire d'une stratégie est généré depuis sa fiche `PARAMS` (`param_inputs`), avec un onglet par groupe, des widgets bornés selon le type, les erreurs de `check` et les presets de `presets/`. La grille d'optimisation est faite de plages (`grid_inputs`). Une nouvelle stratégie enregistrée dans `registry.py` apparaît donc dans toutes les pages sans code d'interface. Les widgets gardent leur valeur dans `st.session_state["<page>_<stratégie>_<paramètre>"]`, et c'est là que les presets l'écrivent, avant que les widgets soient dessinés.
 - Streamlit ré-exécute le script à chaque interaction. Les résultats à conserver vont dans `st.session_state`, les objets à garder pendant toute la vie du serveur dans `st.cache_resource` (le registre des sessions live), et les données téléchargées dans `st.cache_data`.
 - Les sessions live tournent dans des threads (`LiveSessions`). La page les surveille toutes les 5 s en relisant leur journal (`st.fragment(run_every=5)`).
 - Graphiques : couleurs par rôle (ordre catégoriel fixe, bleu pour une série unique, bleu / rouge pour gains / pertes), infobulles au survol, heure de New York.
@@ -345,8 +366,11 @@ L'interface (`quantlab/ui/app.py`) n'a pas de logique propre : chaque page appel
 | `test_execution.py` | broker simulé (open suivant, gaps, OCA, stop prioritaire), router (lots, fills partiels, rejets, sur-exécution, risque, coupe-circuit), portefeuille, métriques, runner |
 | `test_ibkr.py` | client, broker et flux IBKR contre un **faux `EClient`** (`ibkr_fakes.py`) : garde-fous de lecture seule et de compte réel, historique, erreurs, timeouts, reconnexion, commissions, doublons, agrégation des barres, scénario paper complet |
 | `test_session.py` | journal, reprise identique à une exécution sans interruption, rattrapage, replay (accord des signaux, mesure du slippage), session shadow complète avec reprise, récupération IBKR après redémarrage, sauvegarde de toutes les stratégies |
-| `test_cli.py` | parsing des arguments, registre, commandes `backtest` et `optimize` sur les fixtures |
-| `test_ui.py` | interface Streamlit sans navigateur (`AppTest`) : chaque page s'affiche, backtest, replay et graphique de bout en bout, sessions live en tâche de fond sur le faux TWS, refus d'un compte réel non confirmé |
+| `test_exits.py` | plans de sortie par lot, refus sans stop, gaps, groupes (tout ou rien, stop combiné, stop de jambe, jambe manquante), sorties demandées par la stratégie |
+| `test_params.py` | fiches de paramètres : concordance avec les constructeurs, chaque paramètre a un effet, conversion et bornes, règles de cohérence, presets versionnés, `quantlab params` |
+| `test_sizing.py` | modes de taille, plancher du stop, même notionnel par jambe, formule historique de Cascade, application par le router |
+| `test_cli.py` | parsing des arguments (`--param`, `--params-file`, `--range`), registre, commandes `backtest` et `optimize` sur les fixtures |
+| `test_ui.py` | interface Streamlit sans navigateur (`AppTest`) : chaque page s'affiche, formulaires générés depuis les fiches, presets, plages d'optimisation, backtest, replay et graphique de bout en bout, sessions live en tâche de fond sur le faux TWS, refus d'un compte réel non confirmé |
 | `test_bugfixes.py` | régressions des bugs corrigés pendant le refactoring (A1 à A12) et fuite de la clé Massive |
 | `test_walk_forward.py` | découpage des folds, embargo, sélection des paramètres, instances neuves |
 | `test_latency.py` (slow) | latence médiane de `on_bar` pour Cascade < 100 ms |
